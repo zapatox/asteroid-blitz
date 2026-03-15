@@ -23,18 +23,12 @@ function saveSetting(key, val) {
 }
 
 // Master gain nodes (créés à la demande)
-let sfxGain = null, musicGain = null;
+let sfxGain = null;
 function getSfxGain() {
   const ctx = getAudio();
   if (!sfxGain) { sfxGain = ctx.createGain(); sfxGain.connect(ctx.destination); }
   sfxGain.gain.value = settings.sfxVol;
   return sfxGain;
-}
-function getMusicGain() {
-  const ctx = getAudio();
-  if (!musicGain) { musicGain = ctx.createGain(); musicGain.connect(ctx.destination); }
-  musicGain.gain.value = settings.musicVol;
-  return musicGain;
 }
 
 // ─── Son (Web Audio API procédural) ───────────────────────────────────────────
@@ -105,156 +99,41 @@ function playSound(type) {
 
 // ─── Musique 8-bit procédurale (multi-sections, variations) ──────────────────
 
-let musicPlaying = false;
-let musicNodes = [];
-let musicSection = 0;
+// ─── Musique MP3 (menu + game) ───────────────────────────────────────────────
 
-function startMusic() {
-  if (musicPlaying || !settings.sound) return;
-  musicPlaying = true;
-  musicSection = 0;
-  const ctx = getAudio();
-  const master = getMusicGain();
+const menuMusic = new Audio('menu.mp3');
+const gameMusic = new Audio('game.mp3');
+menuMusic.loop = true;
+gameMusic.loop = true;
+menuMusic.volume = settings.musicVol;
+gameMusic.volume = settings.musicVol;
 
-  // Chill synthwave — pentatonique mineure en E
-  const scale = [82.41, 98.00, 110.00, 123.47, 146.83, 164.81, 196.00, 220.00, 246.94, 293.66, 329.63];
-  // E2, G2, A2, B2, D3, E3, G3, A3, B3, D4, E4
+let currentMusic = null;
 
-  // Chord pads (indices dans scale) — accords doux qui tournent
-  const chords = [
-    [0, 2, 4, 7],   // Em
-    [1, 3, 5, 8],   // G
-    [2, 4, 7, 9],   // Am
-    [1, 4, 6, 8],   // G/D
-  ];
-
-  // Arpège lent
-  const arpPatterns = [
-    [4, 7, 9, 7, 5, 7, 9, 10],
-    [5, 7, 8, 7, 4, 5, 7, 9],
-  ];
-
-  // Bass notes (fondamentales, indices)
-  const bassNotes = [0, 1, 2, 1];
-
-  const BPM = 85;
-  const beatDur = 60 / BPM;
-  const loopLen = 8 * beatDur; // 8 beats = ~5.6s
-
-  function scheduleLoop(startTime) {
-    if (!musicPlaying) return;
-    const sec = musicSection % 4;
-    const arpPat = arpPatterns[musicSection % arpPatterns.length];
-    musicSection++;
-
-    // ── Pad chord (warm filtered saw) ──
-    const chord = chords[sec];
-    for (const idx of chord) {
-      const osc = ctx.createOscillator();
-      osc.type = 'sawtooth';
-      osc.frequency.value = scale[idx] * 2; // octave 4
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.value = 800;
-      filter.Q.value = 0.5;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0, startTime);
-      g.gain.linearRampToValueAtTime(0.025, startTime + 0.8);
-      g.gain.setValueAtTime(0.025, startTime + loopLen - 1.0);
-      g.gain.linearRampToValueAtTime(0, startTime + loopLen);
-      osc.connect(filter); filter.connect(g); g.connect(master);
-      osc.start(startTime);
-      osc.stop(startTime + loopLen + 0.1);
-      musicNodes.push(osc);
-    }
-
-    // ── Sub bass (sine, très douce) ──
-    const bassIdx = bassNotes[sec];
-    const bassOsc = ctx.createOscillator();
-    bassOsc.type = 'sine';
-    bassOsc.frequency.value = scale[bassIdx]; // octave basse
-    const bassG = ctx.createGain();
-    bassG.gain.setValueAtTime(0, startTime);
-    bassG.gain.linearRampToValueAtTime(0.08, startTime + 0.3);
-    bassG.gain.setValueAtTime(0.08, startTime + loopLen - 0.5);
-    bassG.gain.linearRampToValueAtTime(0, startTime + loopLen);
-    bassOsc.connect(bassG); bassG.connect(master);
-    bassOsc.start(startTime);
-    bassOsc.stop(startTime + loopLen + 0.1);
-    musicNodes.push(bassOsc);
-
-    // ── Arpège (triangle, notes espacées, chill) ──
-    for (let i = 0; i < 8; i++) {
-      const noteIdx = arpPat[i % arpPat.length];
-      if (noteIdx >= scale.length) continue;
-      const osc = ctx.createOscillator();
-      osc.type = 'triangle';
-      osc.frequency.value = scale[noteIdx] * 2;
-      const g = ctx.createGain();
-      const t = startTime + i * beatDur;
-      const vol = 0.03;
-      g.gain.setValueAtTime(0, t);
-      g.gain.linearRampToValueAtTime(vol, t + 0.04);
-      g.gain.setValueAtTime(vol, t + beatDur * 0.6);
-      g.gain.linearRampToValueAtTime(0, t + beatDur * 0.9);
-      osc.connect(g); g.connect(master);
-      osc.start(t);
-      osc.stop(t + beatDur);
-      musicNodes.push(osc);
-    }
-
-    // ── Kick doux (toutes les 2 beats) ──
-    for (let i = 0; i < 8; i += 2) {
-      const t = startTime + i * beatDur;
-      const kickOsc = ctx.createOscillator();
-      kickOsc.type = 'sine';
-      kickOsc.frequency.setValueAtTime(120, t);
-      kickOsc.frequency.exponentialRampToValueAtTime(40, t + 0.15);
-      const kg = ctx.createGain();
-      kg.gain.setValueAtTime(0.1, t);
-      kg.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-      kickOsc.connect(kg); kg.connect(master);
-      kickOsc.start(t);
-      kickOsc.stop(t + 0.35);
-      musicNodes.push(kickOsc);
-    }
-
-    // ── Hi-hat doux (bruit filtré, toutes les beats) ──
-    for (let i = 0; i < 8; i++) {
-      if (i % 2 === 0) continue; // off-beats only
-      const t = startTime + i * beatDur;
-      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.03, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let j = 0; j < data.length; j++) data[j] = (Math.random() * 2 - 1) * (1 - j / data.length);
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      const flt = ctx.createBiquadFilter();
-      flt.type = 'highpass';
-      flt.frequency.value = 7000;
-      const hg = ctx.createGain();
-      hg.gain.value = 0.02;
-      src.connect(flt); flt.connect(hg); hg.connect(master);
-      src.start(t);
-      musicNodes.push(src);
-    }
-
-    // Nettoyage
-    if (musicNodes.length > 150) musicNodes = musicNodes.slice(-80);
-
-    setTimeout(() => {
-      if (musicPlaying) scheduleLoop(startTime + loopLen);
-    }, (loopLen - 1) * 1000);
-  }
-
-  scheduleLoop(ctx.currentTime + 0.1);
+function playMusic(track) {
+  if (!settings.sound) return;
+  if (currentMusic === track && !track.paused) return;
+  stopMusic();
+  track.volume = settings.musicVol;
+  track.currentTime = 0;
+  track.play().catch(() => {});
+  currentMusic = track;
 }
 
+function startMusic() { playMusic(gameMusic); }
+function startMenuMusic() { playMusic(menuMusic); }
+
 function stopMusic() {
-  musicPlaying = false;
-  for (const n of musicNodes) {
-    try { n.stop(); } catch {}
+  if (currentMusic) {
+    currentMusic.pause();
+    currentMusic.currentTime = 0;
+    currentMusic = null;
   }
-  musicNodes = [];
+}
+
+function updateMusicVolume() {
+  menuMusic.volume = settings.musicVol;
+  gameMusic.volume = settings.musicVol;
 }
 
 // ─── Renderer & Caméra ───────────────────────────────────────────────────────
@@ -1050,7 +929,7 @@ function updateAsteroidMesh(snap) {
 }
 
 // Track shared geometries that must not be disposed
-const _sharedGeos = new Set(Object.values(astGeos));
+const _sharedGeos = new Set([...Object.values(astGeos), SHIP_GEO]);
 function isSharedGeo(geo) {
   if (_sharedGeos.has(geo)) return true;
   for (const eg of edgeGeoCache.values()) if (eg === geo) return true;
@@ -1150,6 +1029,129 @@ function removePickup(id) {
   scene.remove(obj.group);
   disposeGroup(obj.group);
   pickupMeshes.delete(id);
+}
+
+// ─── Ennemis IA ──────────────────────────────────────────────────────────────
+
+let gameDuration = 300;
+let gameDifficulty = 'normal';
+const enemyMeshes = new Map();
+
+function getOrCreateEnemy(snap) {
+  if (enemyMeshes.has(snap.id)) return enemyMeshes.get(snap.id);
+
+  const group = new THREE.Group();
+
+  // Réutiliser la géométrie du vaisseau avec une couleur rouge
+  const mat = new THREE.MeshPhongMaterial({ color: 0xff3333, emissive: 0xff1111, emissiveIntensity: 0.4, flatShading: true, side: THREE.DoubleSide });
+  const body = new THREE.Mesh(SHIP_GEO, mat);
+  body.scale.setScalar(0.9);
+  group.add(body);
+
+  // Glow rouge
+  const glowMat = new THREE.SpriteMaterial({ color: 0xff0000, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
+  const glow = new THREE.Sprite(glowMat);
+  glow.scale.setScalar(40);
+  group.add(glow);
+
+  // Edges
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.6 });
+  const edgeLine = new THREE.LineSegments(new THREE.EdgesGeometry(SHIP_GEO, 30), edgeMat);
+  edgeLine.scale.setScalar(0.9);
+  group.add(edgeLine);
+
+  scene.add(group);
+  const obj = { group, body, glow };
+  enemyMeshes.set(snap.id, obj);
+  return obj;
+}
+
+function updateEnemyMesh(snap) {
+  const obj = getOrCreateEnemy(snap);
+  if (!snap.alive) {
+    obj.group.visible = false;
+    return;
+  }
+  obj.group.visible = true;
+  obj.group.position.set(snap.x, snap.y, 0);
+  obj.group.rotation.z = snap.angle - Math.PI / 2;
+  // Pulse glow
+  const t = Date.now() * 0.001;
+  obj.glow.material.opacity = 0.2 + Math.sin(t * 3) * 0.1;
+}
+
+function removeEnemy(id) {
+  const obj = enemyMeshes.get(id);
+  if (!obj) return;
+  scene.remove(obj.group);
+  disposeGroup(obj.group);
+  enemyMeshes.delete(id);
+}
+
+// ─── Boss ────────────────────────────────────────────────────────────────────
+
+let bossMesh = null;
+
+function getOrCreateBoss() {
+  if (bossMesh) return bossMesh;
+
+  const group = new THREE.Group();
+
+  // Grand vaisseau boss (3x la taille)
+  const mat = new THREE.MeshPhongMaterial({ color: 0xcc0000, emissive: 0xff0000, emissiveIntensity: 0.5, flatShading: true, side: THREE.DoubleSide });
+  const body = new THREE.Mesh(SHIP_GEO, mat);
+  body.scale.setScalar(3.5);
+  group.add(body);
+
+  // Edges épaisses
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.8, linewidth: 2 });
+  const edgeLine = new THREE.LineSegments(new THREE.EdgesGeometry(SHIP_GEO, 30), edgeMat);
+  edgeLine.scale.setScalar(3.5);
+  group.add(edgeLine);
+
+  // Glow intense
+  const glowMat = new THREE.SpriteMaterial({ color: 0xff0000, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending });
+  const glow = new THREE.Sprite(glowMat);
+  glow.scale.setScalar(120);
+  group.add(glow);
+
+  // 2ème couche de glow pulsante
+  const glow2Mat = new THREE.SpriteMaterial({ color: 0xff4400, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending });
+  const glow2 = new THREE.Sprite(glow2Mat);
+  glow2.scale.setScalar(180);
+  group.add(glow2);
+
+  scene.add(group);
+  bossMesh = { group, body, glow, glow2 };
+  return bossMesh;
+}
+
+function updateBossMesh(bossSnap) {
+  if (!bossSnap || !bossSnap.alive) {
+    if (bossMesh) bossMesh.group.visible = false;
+    document.getElementById('boss-hud').style.display = 'none';
+    return;
+  }
+
+  const obj = getOrCreateBoss();
+  obj.group.visible = true;
+  obj.group.position.set(bossSnap.x, bossSnap.y, 0);
+  obj.group.rotation.z = bossSnap.angle - Math.PI / 2;
+
+  const t = Date.now() * 0.001;
+  obj.glow.material.opacity = 0.3 + Math.sin(t * 2) * 0.15;
+  obj.glow2.material.opacity = 0.15 + Math.sin(t * 1.5 + 1) * 0.1;
+  obj.glow2.scale.setScalar(160 + Math.sin(t * 2) * 30);
+
+  // Phase colors
+  const phaseColors = [0xff0000, 0xff6600, 0xffff00]; // chase, spiral, charge
+  obj.body.material.emissive.setHex(phaseColors[bossSnap.phase] || 0xff0000);
+
+  // HUD barre de vie
+  const bossHud = document.getElementById('boss-hud');
+  bossHud.style.display = 'block';
+  const fill = document.getElementById('boss-hp-fill');
+  fill.style.width = Math.max(0, (bossSnap.hp / bossSnap.maxHp) * 100) + '%';
 }
 
 // ─── Particules / Explosions ──────────────────────────────────────────────────
@@ -1364,11 +1366,16 @@ window.addEventListener('keyup', e => {
   if (map.shoot.includes(e.code)) keys.shoot  = false;
 });
 
-// Clic souris = tir (gauche) / dash (droit)
+// Clic souris = tir (gauche maintenu) / dash (droit)
+let mouseDown = false;
 canvas.addEventListener('mousedown', e => {
-  if (e.button === 0) clickShootFrame = true;
+  if (e.button === 0) { clickShootFrame = true; mouseDown = true; }
   if (e.button === 2) dashFrame = true;
 });
+canvas.addEventListener('mouseup', e => {
+  if (e.button === 0) mouseDown = false;
+});
+canvas.addEventListener('mouseleave', () => { mouseDown = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 let dashFrame = false;
 
@@ -1412,10 +1419,17 @@ let prevScores  = {};
 
 function updateHUD(snap) {
   if (!snap) return;
-  const remaining = Math.max(0, 180 - (snap.elapsed || 0));
-  const m = Math.floor(remaining / 60);
-  const s = Math.floor(remaining % 60);
-  timerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+  const dur = snap.duration || gameDuration || 300;
+  if (snap.boss && snap.boss.alive) {
+    timerEl.textContent = '⚠ BOSS';
+    timerEl.style.color = '#ff3333';
+  } else {
+    const remaining = Math.max(0, dur - (snap.elapsed || 0));
+    const m = Math.floor(remaining / 60);
+    const s = Math.floor(remaining % 60);
+    timerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+    timerEl.style.color = remaining <= 30 ? '#ff3333' : '';
+  }
 
   scoresEl.innerHTML = '';
   for (const p of snap.players) {
@@ -1508,8 +1522,10 @@ function updateInventory(snap) {
   const me = snap.players.find(p => p.id === myId);
   if (!me) return;
 
-  // Build slots dynamiquement
+  // Build slots dynamiquement — toutes les armes montrent leur ammo
   const weapons = [{ id: 'bullet', icon: '•', label: 'BULLET', available: true }];
+  if (me.trishot) weapons.push({ id: 'trishot', icon: '🔱', label: 'TRISHOT', available: true, ammo: me.trishot, color: '#4488ff' });
+  if (me.minigun) weapons.push({ id: 'minigun', icon: '🔫', label: 'MINIGUN', available: true, ammo: me.minigun, color: '#ff4444' });
   if (me.laser) weapons.push({ id: 'laser', icon: '⚡', label: 'LASER', available: true, ammo: me.laser });
   if (me.missile) weapons.push({ id: 'missile', icon: '🚀', label: 'MISSILE', available: true, ammo: me.missile });
 
@@ -1518,7 +1534,7 @@ function updateInventory(snap) {
 
   inventoryBar.innerHTML = weapons.map(w => {
     const active = w.id === selectedWeapon ? ' active' : '';
-    const color = w.id === 'laser' ? '#4488ff' : w.id === 'missile' ? '#ff2266' : '#00ffff';
+    const color = w.color || (w.id === 'laser' ? '#4488ff' : w.id === 'missile' ? '#ff2266' : '#00ffff');
     let extra = '';
     if (w.ammo !== undefined) extra = `<div class="inv-ammo" style="color:${color}">×${w.ammo}</div>`;
     return `<div class="inv-slot${active}" data-weapon="${w.id}" style="border-color:${active ? color : ''}">
@@ -1540,11 +1556,9 @@ function updateInventory(snap) {
   const buffDefs = [
     { key: 'boosted', ticks: 'boostTicks', max: 120, icon: '⚡', label: 'BOOST', cls: 'boost' },
     { key: 'rapid', ticks: 'rapidTicks', max: 100, icon: '🔥', label: 'RAPID', cls: 'rapid' },
-    { key: 'trishot', ticks: 'trishot', max: 100, icon: '🔱', label: 'TRISHOT', cls: 'trishot', color: '#4488ff' },
     { key: 'drone', ticks: 'drone', max: 300, icon: '🤖', label: 'DRONE', cls: 'drone', color: '#bb44ff' },
     { key: 'magnet', ticks: 'magnet', max: 300, icon: '🧲', label: 'MAGNET', cls: 'magnet', color: '#ffaa00' },
     { key: 'intangible', ticks: 'intangible', max: 80, icon: '👻', label: 'GHOST', cls: 'intangible', color: '#ffaa00' },
-    { key: 'minigun', ticks: 'minigun', max: 80, icon: '🔫', label: 'MINIGUN', cls: 'minigun', color: '#ff4444' },
     { key: 'gravwell', ticks: 'gravwell', max: 120, icon: '🌀', label: 'GRAVITY', cls: 'gravwell', color: '#8844ff' },
   ];
   for (const b of buffDefs) {
@@ -1565,6 +1579,8 @@ canvas.addEventListener('wheel', e => {
   const me = currSnapshot?.players.find(p => p.id === myId);
   if (!me) return;
   const weapons = ['bullet'];
+  if (me.trishot) weapons.push('trishot');
+  if (me.minigun) weapons.push('minigun');
   if (me.laser) weapons.push('laser');
   if (me.missile) weapons.push('missile');
   const idx = weapons.indexOf(selectedWeapon);
@@ -1602,7 +1618,7 @@ function triggerPickupFlash(pickupType) {
 
 // ─── Gestion events serveur ───────────────────────────────────────────────────
 
-const EVENT_TYPES = new Set(['bolt','shot_fired','asteroid_destroyed','deflect','player_hit','player_killed','pickup_collected','missile_hit','border_zap','loot_dropped','nuke_activated','drone_shot','asteroid_storm','pickup_despawn','gravwell_placed']);
+const EVENT_TYPES = new Set(['bolt','shot_fired','asteroid_destroyed','deflect','player_hit','player_killed','pickup_collected','missile_hit','border_zap','loot_dropped','nuke_activated','drone_shot','asteroid_storm','pickup_despawn','gravwell_placed','enemy_killed','boss_killed','boss_special']);
 
 function handleEvent(msg) {
   // Laser (hitscan) — dessiner le rayon instantané
@@ -1728,6 +1744,30 @@ function handleEvent(msg) {
     spawnExplosion(msg.x, msg.y, 30, 0x8844ff);
     playSound('pickup');
   }
+
+  if (msg.type === 'enemy_killed') {
+    spawnExplosion(msg.x, msg.y, 25, 0xff3333);
+    triggerShake(6);
+    playSound('explode');
+    if (msg.killerId === myId) {
+      spawnScorePopup(`+${msg.pts} KILL`, '#ff3333', msg.x, msg.y);
+    }
+  }
+
+  if (msg.type === 'boss_killed') {
+    spawnExplosion(msg.x, msg.y, 50, 0xff0000);
+    spawnExplosion(msg.x + 30, msg.y - 20, 40, 0xff6600);
+    spawnExplosion(msg.x - 20, msg.y + 30, 40, 0xffff00);
+    triggerShake(20);
+    playSound('explode');
+    showAnnouncement('🏆 BOSS DEFEATED! 🏆', '#ffaa00');
+  }
+
+  if (msg.type === 'boss_special') {
+    spawnExplosion(msg.x, msg.y, 35, 0xff4400);
+    triggerShake(8);
+    playSound('explode');
+  }
 }
 
 // ─── Écrans ───────────────────────────────────────────────────────────────────
@@ -1761,6 +1801,12 @@ function showScreen(name) {
   hudEl.style.display          = name === 'hud'      ? 'block' : 'none';
   // Hide cursor during gameplay
   document.body.style.cursor = name === 'hud' ? 'none' : '';
+  // Musique : menu dans lobby/join/waiting/gameover, game en jeu
+  const wantTrack = name === 'hud' ? gameMusic : menuMusic;
+  if (currentMusic !== wantTrack || wantTrack.paused) {
+    stopMusic();
+    playMusic(wantTrack);
+  }
 }
 
 function renderWaitingPlayers(players) {
@@ -1786,6 +1832,12 @@ function renderWaitingPlayers(players) {
 }
 
 showScreen('lobby');
+
+// Autoplay policy : démarrer la musique menu au premier clic
+document.addEventListener('click', function firstClick() {
+  startMenuMusic();
+  document.removeEventListener('click', firstClick);
+}, { once: true });
 
 // ─── Menu Options ─────────────────────────────────────────────────────────────
 
@@ -1832,7 +1884,7 @@ sliderSfx.addEventListener('input', () => {
 sliderMusic.addEventListener('input', () => {
   saveSetting('musicVol', sliderMusic.value / 100);
   musicValLabel.textContent = sliderMusic.value + '%';
-  if (musicGain) musicGain.gain.value = settings.musicVol;
+  updateMusicVolume();
 });
 
 document.getElementById('btn-close-settings').addEventListener('click', toggleSettings);
@@ -1869,6 +1921,8 @@ function connect() {
       roomCodeVal.textContent = msg.code;
       btnStartGame.style.display = 'block';
       waitingStatus.style.display = 'none';
+      const hostSettings = document.getElementById('host-settings');
+      if (hostSettings) hostSettings.style.display = 'flex';
       showScreen('waiting');
       startInputLoop();
     }
@@ -1894,9 +1948,14 @@ function connect() {
     }
 
     if (msg.type === 'start') {
+      gameDuration = msg.duration || 300;
+      gameDifficulty = msg.difficulty || 'normal';
       showScreen('hud');
       prevScores = {}; localPred = null;
-      startMusic();
+      // Clear old enemy/boss meshes
+      for (const [id] of enemyMeshes) removeEnemy(id);
+      bossMesh = null;
+      document.getElementById('boss-hud').style.display = 'none';
     }
 
     if (msg.type === 'snapshot') {
@@ -1929,6 +1988,8 @@ function connect() {
       for (const id of asteroidMeshes.keys())    if (!astIds.has(id))     removeAsteroid(id);
       for (const id of pickupMeshes.keys())      if (!pickupIds.has(id))  removePickup(id);
       for (const id of projectileMeshes.keys())  if (!projIds.has(id))    removeProjectile(id);
+      const enemyIds = new Set((msg.enemies || []).map(e => e.id));
+      for (const id of enemyMeshes.keys())       if (!enemyIds.has(id))   removeEnemy(id);
 
       // Events batchés dans le snapshot
       if (msg.events) for (const ev of msg.events) handleEvent(ev);
@@ -1937,13 +1998,17 @@ function connect() {
     if (EVENT_TYPES.has(msg.type)) handleEvent(msg);
 
     if (msg.type === 'gameover') {
-      stopMusic();
       showScreen('gameover');
       document.getElementById('gameover-scores').innerHTML = msg.scores.map((s, i) =>
         `<div class="go-entry" style="border-color:${s.color};color:${s.color}">
           ${i === 0 ? '🏆' : `#${i+1}`} ${s.name} — ${s.score} 💎
         </div>`
       ).join('');
+    }
+
+    if (msg.type === 'highscores') {
+      hsData = msg.data || {};
+      renderHighscores();
     }
   };
 }
@@ -1954,7 +2019,7 @@ function startInputLoop() {
   if (inputInterval) return;
   inputInterval = setInterval(() => {
     if (ws?.readyState !== 1) return;
-    const shootNow = keys.shoot || clickShootFrame;
+    const shootNow = keys.shoot || clickShootFrame || mouseDown;
     clickShootFrame = false;
     const dash = dashFrame; dashFrame = false;
     ws.send(JSON.stringify({ type: 'input', seq: inputSeq++, keys: { ...keys, shoot: shootNow, dash, selectedWeapon } }));
@@ -1994,14 +2059,107 @@ inputCode.addEventListener('input', () => { inputCode.value = inputCode.value.to
 // Annuler → retour lobby
 btnJoinCancel.addEventListener('click', () => showScreen('lobby'));
 
-// Lancer la partie (host uniquement)
+// Lancer la partie (host uniquement) avec settings
+let selectedDuration = 300;
+let selectedDifficulty = 'normal';
+
+// Boutons durée
+document.querySelectorAll('#duration-btns .btn-option').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#duration-btns .btn-option').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedDuration = parseInt(btn.dataset.val);
+  });
+});
+
+// Boutons difficulté
+const diffDescs = { easy: 'Pas d\'ennemis · Boss final', normal: 'Ennemis IA modérés · Boss final', hardcore: 'Ennemis agressifs · Boss puissant' };
+document.querySelectorAll('#difficulty-btns .btn-option').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#difficulty-btns .btn-option').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedDifficulty = btn.dataset.val;
+    document.getElementById('diff-desc').textContent = diffDescs[selectedDifficulty];
+  });
+});
+
 btnStartGame.addEventListener('click', () => {
-  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'start_game' }));
+  if (ws?.readyState === 1) ws.send(JSON.stringify({
+    type: 'start_game',
+    duration: selectedDuration,
+    difficulty: selectedDifficulty,
+  }));
 });
 
 // Rejouer (après gameover — host uniquement côté serveur)
 btnRestart.addEventListener('click', () => {
   if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'restart' }));
+});
+
+// ─── Highscores ──────────────────────────────────────────────────────────────
+
+let hsData = {};
+let hsDiff = 'normal';
+let hsDur = '300';
+
+const hsPanel = document.getElementById('highscores-panel');
+const hsTable = document.getElementById('hs-table');
+const hsDiffBtns = document.getElementById('hs-diff-btns');
+const hsDurBtns = document.getElementById('hs-dur-btns');
+
+document.getElementById('btn-highscores').addEventListener('click', () => {
+  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'get_highscores' }));
+  hsPanel.style.display = 'flex';
+  renderHighscores();
+});
+
+document.getElementById('btn-close-highscores').addEventListener('click', () => {
+  hsPanel.style.display = 'none';
+});
+
+hsDiffBtns.addEventListener('click', e => {
+  const btn = e.target.closest('.btn-option');
+  if (!btn) return;
+  hsDiffBtns.querySelectorAll('.btn-option').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  hsDiff = btn.dataset.val;
+  renderHighscores();
+});
+
+hsDurBtns.addEventListener('click', e => {
+  const btn = e.target.closest('.btn-option');
+  if (!btn) return;
+  hsDurBtns.querySelectorAll('.btn-option').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  hsDur = btn.dataset.val;
+  renderHighscores();
+});
+
+function renderHighscores() {
+  const key = `${hsDiff}_${hsDur}`;
+  const scores = hsData[key] || [];
+  if (scores.length === 0) {
+    hsTable.innerHTML = '<div class="hs-empty">Aucun score enregistré</div>';
+    return;
+  }
+  hsTable.innerHTML = scores.map((s, i) => {
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i+1}`;
+    const d = new Date(s.date);
+    const dateStr = `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}`;
+    return `<div class="hs-entry">
+      <span class="hs-rank">${medal}</span>
+      <span class="hs-name">${s.name}</span>
+      <span class="hs-score">${s.score} 💎</span>
+      <span class="hs-date">${dateStr}</span>
+    </div>`;
+  }).join('');
+}
+
+// ESC ferme aussi le panneau highscores
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && hsPanel.style.display === 'flex') {
+    hsPanel.style.display = 'none';
+  }
 });
 
 // ─── Boucle de rendu ──────────────────────────────────────────────────────────
@@ -2029,6 +2187,8 @@ function animate(now) {
     for (const snap of currSnapshot.asteroids) updateAsteroidMesh(snap); // smooth-follow, pas d'alpha
     for (const snap of (currSnapshot.pickups || []))  updatePickupMesh(snap);
     for (const snap of (currSnapshot.projectiles || [])) updateProjectileMesh(snap, dt);
+    for (const snap of (currSnapshot.enemies || []))  updateEnemyMesh(snap);
+    updateBossMesh(currSnapshot.boss);
 
     updateHUD(currSnapshot);
     updateInventory(currSnapshot);

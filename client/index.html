@@ -74,7 +74,33 @@
       <span id="controls-hint-keys">ZQSD / Flèches</span>
       <span>· ESPACE / CLIC — Tirer · CLIC DROIT — Dash</span>
     </div>
-    <button class="btn-settings-small" onclick="document.getElementById('settings-panel').style.display='flex'">⚙ Options</button>
+    <div class="lobby-buttons" style="margin-top:6px">
+      <button class="btn-settings-small" onclick="document.getElementById('settings-panel').style.display='flex'">⚙ Options</button>
+      <button class="btn-settings-small" id="btn-highscores">🏆 Scores</button>
+    </div>
+  </div>
+
+  <!-- Tableau des Highscores -->
+  <div id="highscores-panel" style="display:none">
+    <div class="settings-box highscores-box">
+      <h3>🏆 HIGHSCORES</h3>
+      <div class="hs-filters">
+        <div class="btn-group" id="hs-diff-btns">
+          <button class="btn-option" data-val="easy">FACILE</button>
+          <button class="btn-option active" data-val="normal">NORMAL</button>
+          <button class="btn-option" data-val="hardcore">HARDCORE</button>
+        </div>
+        <div class="btn-group" id="hs-dur-btns">
+          <button class="btn-option" data-val="180">3 MIN</button>
+          <button class="btn-option active" data-val="300">5 MIN</button>
+          <button class="btn-option" data-val="600">10 MIN</button>
+        </div>
+      </div>
+      <div id="hs-table">
+        <div class="hs-empty">Aucun score enregistré</div>
+      </div>
+      <button id="btn-close-highscores" class="btn-close">FERMER (ESC)</button>
+    </div>
   </div>
 
   <!-- Écran rejoindre (saisie du code) -->
@@ -93,11 +119,39 @@
   <div id="screen-waiting" class="screen" style="display:none">
     <div id="room-code-display">CODE : <span id="room-code-val">----</span></div>
     <div id="waiting-players"></div>
+
+    <!-- Settings host only -->
+    <div id="host-settings" style="display:none">
+      <div class="setting-group">
+        <div class="setting-label">DURÉE</div>
+        <div class="btn-group" id="duration-btns">
+          <button class="btn-option" data-val="180">3 MIN</button>
+          <button class="btn-option active" data-val="300">5 MIN</button>
+          <button class="btn-option" data-val="600">10 MIN</button>
+        </div>
+      </div>
+      <div class="setting-group">
+        <div class="setting-label">DIFFICULTÉ</div>
+        <div class="btn-group" id="difficulty-btns">
+          <button class="btn-option" data-val="easy">FACILE</button>
+          <button class="btn-option active" data-val="normal">NORMAL</button>
+          <button class="btn-option" data-val="hardcore">HARDCORE</button>
+        </div>
+        <div class="difficulty-desc" id="diff-desc">Ennemis IA modérés · Boss final</div>
+      </div>
+    </div>
+
     <button id="btn-start-game" style="display:none">LANCER LA PARTIE</button>
     <div id="waiting-status">En attente du créateur...</div>
     <div class="controls-hint" style="margin-top:16px">
       <span>WASD / Flèches — Déplacements · ESPACE / CLIC — Tirer</span>
     </div>
+  </div>
+
+  <!-- Barre de vie Boss -->
+  <div id="boss-hud" style="display:none">
+    <div class="boss-label">⚠ BOSS ⚠</div>
+    <div class="boss-hp-bar"><div class="boss-hp-fill" id="boss-hp-fill"></div></div>
   </div>
 
   <!-- HUD en jeu -->
@@ -167,8 +221,8 @@
           <div class="rarity-header" style="color:#4488ff">— Rare —</div>
           <span style="color:#4488ff">⚡ Boost 6s</span>
           <span style="color:#4488ff">🔥 Rapid-fire 5s</span>
-          <span style="color:#4488ff">🔱 Triple-shot 5s</span>
-          <span style="color:#ff4444">🔫 Minigun 4s</span>
+          <span style="color:#4488ff">🔱 Triple-shot ×30</span>
+          <span style="color:#ff4444">🔫 Minigun ×80</span>
           <div class="rarity-header" style="color:#bb44ff">— Épique —</div>
           <span style="color:#bb44ff">⚡ Laser ×8</span>
           <span style="color:#bb44ff">🚀 Missile ×3</span>
