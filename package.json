@@ -1,0 +1,7 @@
+{
+  "name": "asteroid-blitz",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "bun run server/index.js"
+  }
+}

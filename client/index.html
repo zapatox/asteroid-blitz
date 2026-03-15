@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Asteroid Blitz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.163.0/build/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <!-- ════ Cadre rétro 8-bit sci-fi vaporwave ════ -->
+  <div id="retro-frame" aria-hidden="true">
+
+    <!-- Coins L-brackets -->
+    <div class="rf-corner rf-tl">
+      <div class="rf-dot"></div>
+      <span class="rf-tag">SYS.01</span>
+    </div>
+    <div class="rf-corner rf-tr">
+      <div class="rf-dot"></div>
+      <span class="rf-tag rf-tag-r">BLITZ</span>
+    </div>
+    <div class="rf-corner rf-bl">
+      <div class="rf-dot"></div>
+      <span class="rf-tag rf-tag-b">NET</span>
+    </div>
+    <div class="rf-corner rf-br">
+      <div class="rf-dot"></div>
+      <span class="rf-tag rf-tag-r rf-tag-b">v2.0</span>
+    </div>
+
+    <!-- Diamants mi-bords -->
+    <div class="rf-mid rf-mid-t"></div>
+    <div class="rf-mid rf-mid-b"></div>
+    <div class="rf-mid rf-mid-l"></div>
+    <div class="rf-mid rf-mid-r"></div>
+
+    <!-- Tirets des bords (entre les coins) -->
+    <div class="rf-edge rf-edge-t"></div>
+    <div class="rf-edge rf-edge-b"></div>
+    <div class="rf-edge rf-edge-l"></div>
+    <div class="rf-edge rf-edge-r"></div>
+
+    <!-- Scanline ambiante -->
+    <div id="rf-ambient-scan"></div>
+
+    <!-- Flash pickup (bords écran) -->
+    <div id="pickup-flash"></div>
+    <!-- Sweep horizontal -->
+    <div id="pickup-scan"></div>
+
+  </div>
+
+  <!-- Écran lobby (menu principal) -->
+  <div id="screen-lobby" class="screen">
+    <h1 class="title">ASTEROID<br><span>BLITZ</span></h1>
+    <div id="lobby-info">Connexion au serveur...</div>
+    <input id="input-name" type="text" placeholder="TON NOM" maxlength="12" autocomplete="off">
+    <div class="lobby-buttons">
+      <button id="btn-create">CRÉER</button>
+      <button id="btn-show-join">REJOINDRE</button>
+    </div>
+    <div class="controls-hint">
+      <span id="controls-hint-keys">ZQSD / Flèches</span>
+      <span>· ESPACE / CLIC — Tirer · CLIC DROIT — Dash</span>
+    </div>
+    <button class="btn-settings-small" onclick="document.getElementById('settings-panel').style.display='flex'">⚙ Options</button>
+  </div>
+
+  <!-- Écran rejoindre (saisie du code) -->
+  <div id="screen-join" class="screen" style="display:none">
+    <h2 class="waiting-title">REJOINDRE</h2>
+    <p class="join-label">CODE DE LA SALLE</p>
+    <input id="input-code" type="text" maxlength="4" placeholder="XXXX" autocomplete="off">
+    <div id="join-error"></div>
+    <div class="lobby-buttons">
+      <button id="btn-join-ok">OK</button>
+      <button id="btn-join-cancel">ANNULER</button>
+    </div>
+  </div>
+
+  <!-- Salle d'attente -->
+  <div id="screen-waiting" class="screen" style="display:none">
+    <div id="room-code-display">CODE : <span id="room-code-val">----</span></div>
+    <div id="waiting-players"></div>
+    <button id="btn-start-game" style="display:none">LANCER LA PARTIE</button>
+    <div id="waiting-status">En attente du créateur...</div>
+    <div class="controls-hint" style="margin-top:16px">
+      <span>WASD / Flèches — Déplacements · ESPACE / CLIC — Tirer</span>
+    </div>
+  </div>
+
+  <!-- HUD en jeu -->
+  <div id="hud" style="display:none">
+    <div id="hud-timer">3:00</div>
+    <div id="weapon-indicator" style="display:none"></div>
+    <div id="hud-scores"></div>
+    <div id="score-popups"></div>
+    <div id="inventory-bar">
+      <div class="inv-slot" data-weapon="bullet">
+        <div class="inv-icon">•</div>
+        <div class="inv-label">BULLET</div>
+      </div>
+    </div>
+    <div id="active-buffs"></div>
+    <button id="btn-settings" title="Options (ESC)">⚙</button>
+  </div>
+
+  <!-- Fin de partie -->
+  <div id="screen-gameover" class="screen" style="display:none">
+    <h2 class="gameover-title">FIN DE PARTIE</h2>
+    <div id="gameover-scores"></div>
+    <button id="btn-restart">REJOUER</button>
+  </div>
+
+  <!-- Menu Options -->
+  <div id="settings-panel" style="display:none">
+    <div class="settings-box">
+      <h3>⚙ OPTIONS</h3>
+
+      <div class="setting-row">
+        <span>Contrôles</span>
+        <button id="toggle-layout">WASD / ZQSD</button>
+      </div>
+      <div class="setting-note">
+        W / Z = propulseur &nbsp;·&nbsp; A / Q = gauche &nbsp;·&nbsp; D = droite<br>
+        ESPACE ou CLIC GAUCHE = tirer
+      </div>
+
+      <div class="setting-row">
+        <span>Son</span>
+        <button id="toggle-sound">SON : ON</button>
+      </div>
+
+      <div class="setting-row">
+        <span>Effets</span>
+        <div class="slider-group">
+          <input id="slider-sfx" type="range" min="0" max="100" value="70" class="vol-slider">
+          <span id="sfx-val" class="vol-val">70%</span>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <span>Musique</span>
+        <div class="slider-group">
+          <input id="slider-music" type="range" min="0" max="100" value="30" class="vol-slider">
+          <span id="music-val" class="vol-val">30%</span>
+        </div>
+      </div>
+
+      <div class="setting-row pickup-info-row">
+        <span>Pickups</span>
+        <div class="pickup-legend">
+          <div class="rarity-header" style="color:#cccccc">— Commun —</div>
+          <span style="color:#cccccc">💎 Cristaux +30pts</span>
+          <span style="color:#cccccc">🛡 Bouclier HP+1</span>
+          <div class="rarity-header" style="color:#4488ff">— Rare —</div>
+          <span style="color:#4488ff">⚡ Boost 6s</span>
+          <span style="color:#4488ff">🔥 Rapid-fire 5s</span>
+          <span style="color:#4488ff">🔱 Triple-shot 5s</span>
+          <span style="color:#ff4444">🔫 Minigun 4s</span>
+          <div class="rarity-header" style="color:#bb44ff">— Épique —</div>
+          <span style="color:#bb44ff">⚡ Laser ×8</span>
+          <span style="color:#bb44ff">🚀 Missile ×3</span>
+          <span style="color:#bb44ff">🤖 Drone 15s</span>
+          <span style="color:#8844ff">🌀 Gravity Well 6s</span>
+          <div class="rarity-header" style="color:#ffaa00">— Légendaire —</div>
+          <span style="color:#ffaa00">💥 Nuke (tous)</span>
+          <span style="color:#ffaa00">🧲 Magnet 15s</span>
+          <span style="color:#ffaa00">👻 Intangible 4s</span>
+        </div>
+      </div>
+
+      <button id="btn-close-settings" class="btn-close">FERMER (ESC)</button>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>
