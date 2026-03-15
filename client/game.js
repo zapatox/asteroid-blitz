@@ -1066,15 +1066,25 @@ function getOrCreateEnemy(snap) {
   return obj;
 }
 
-function updateEnemyMesh(snap) {
+function updateEnemyMesh(snap, alpha) {
   const obj = getOrCreateEnemy(snap);
   if (!snap.alive) {
     obj.group.visible = false;
     return;
   }
   obj.group.visible = true;
-  obj.group.position.set(snap.x, snap.y, 0);
-  obj.group.rotation.z = snap.angle - Math.PI / 2;
+  // Interpolation entre prev et curr
+  let x = snap.x, y = snap.y, angle = snap.angle;
+  if (prevSnapshot && alpha < 1) {
+    const prev = (prevSnapshot.enemies || []).find(e => e.id === snap.id);
+    if (prev && prev.alive) {
+      x = lerpWrap(prev.x, snap.x, alpha);
+      y = lerpWrap(prev.y, snap.y, alpha);
+      angle = lerpAngle(prev.angle, snap.angle, alpha);
+    }
+  }
+  obj.group.position.set(x, y, 0);
+  obj.group.rotation.z = angle - Math.PI / 2;
   // Pulse glow
   const t = Date.now() * 0.001;
   obj.glow.material.opacity = 0.2 + Math.sin(t * 3) * 0.1;
@@ -1126,7 +1136,7 @@ function getOrCreateBoss() {
   return bossMesh;
 }
 
-function updateBossMesh(bossSnap) {
+function updateBossMesh(bossSnap, alpha) {
   if (!bossSnap || !bossSnap.alive) {
     if (bossMesh) bossMesh.group.visible = false;
     document.getElementById('boss-hud').style.display = 'none';
@@ -1135,8 +1145,15 @@ function updateBossMesh(bossSnap) {
 
   const obj = getOrCreateBoss();
   obj.group.visible = true;
-  obj.group.position.set(bossSnap.x, bossSnap.y, 0);
-  obj.group.rotation.z = bossSnap.angle - Math.PI / 2;
+  // Interpolation boss
+  let x = bossSnap.x, y = bossSnap.y, angle = bossSnap.angle;
+  if (prevSnapshot && prevSnapshot.boss && prevSnapshot.boss.alive && alpha < 1) {
+    x = lerpWrap(prevSnapshot.boss.x, bossSnap.x, alpha);
+    y = lerpWrap(prevSnapshot.boss.y, bossSnap.y, alpha);
+    angle = lerpAngle(prevSnapshot.boss.angle, bossSnap.angle, alpha);
+  }
+  obj.group.position.set(x, y, 0);
+  obj.group.rotation.z = angle - Math.PI / 2;
 
   const t = Date.now() * 0.001;
   obj.glow.material.opacity = 0.3 + Math.sin(t * 2) * 0.15;
@@ -1863,6 +1880,8 @@ function updateSettingsUI() {
 function toggleSettings() {
   const open = settingsPanel.style.display === 'flex';
   settingsPanel.style.display = open ? 'none' : 'flex';
+  // Afficher le curseur quand les options sont ouvertes en jeu
+  document.body.style.cursor = open ? 'none' : '';
 }
 
 toggleLayout.addEventListener('click', () => {
@@ -2187,8 +2206,8 @@ function animate(now) {
     for (const snap of currSnapshot.asteroids) updateAsteroidMesh(snap); // smooth-follow, pas d'alpha
     for (const snap of (currSnapshot.pickups || []))  updatePickupMesh(snap);
     for (const snap of (currSnapshot.projectiles || [])) updateProjectileMesh(snap, dt);
-    for (const snap of (currSnapshot.enemies || []))  updateEnemyMesh(snap);
-    updateBossMesh(currSnapshot.boss);
+    for (const snap of (currSnapshot.enemies || []))  updateEnemyMesh(snap, alpha);
+    updateBossMesh(currSnapshot.boss, alpha);
 
     updateHUD(currSnapshot);
     updateInventory(currSnapshot);

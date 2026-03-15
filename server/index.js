@@ -458,6 +458,11 @@ function hitAsteroid(a, p, events, forceDestroy = false, impactVx, impactVy) {
 function processShots(events) {
   for (const p of gameState.players.values()) {
     if (!p.alive || p.respawnTimer > 0) continue;
+    // Minigun = tir continu géré par integrateMinigun(), skip processShots
+    if (p.selectedWeapon === 'minigun' && p.effects.minigun > 0) {
+      p.prevShoot = p.shoot;
+      continue;
+    }
     const shoot = p.shoot && !p.prevShoot && p.shootCooldown === 0;
     p.prevShoot = p.shoot;
     if (!shoot) continue;
@@ -729,8 +734,6 @@ function checkAsteroidPlayerCollisions(events) {
       const r = a.radius + 8;
       if (dist2(a.x, a.y, p.x, p.y) < r * r) {
         p.hp--;
-        p.respawnTimer = RESPAWN_TICKS;
-
         events.push({ type: 'player_hit', x: p.x, y: p.y, victimId: p.id, byId: a.deflectedBy });
 
         if (a.deflectedBy) {
@@ -743,9 +746,10 @@ function checkAsteroidPlayerCollisions(events) {
         gameState.asteroids.delete(a.id);
 
         if (p.hp <= 0) {
-          p.alive = false;
-          p.hp = 0;
-          events.push({ type: 'player_killed', x: p.x, y: p.y, victimId: p.id });
+          killPlayer(p);
+          events.push({ type: 'player_killed', x: p.x, y: p.y, victimId: p.id, livesLeft: p.lives });
+        } else {
+          p.respawnTimer = RESPAWN_TICKS;
         }
         break;
       }
@@ -1174,16 +1178,7 @@ function integrateBoss(events) {
 function checkWinCondition() {
   const elapsed = (Date.now() - gameState.startTime) / 1000;
   const duration = gameState.settings?.duration || GAME_DURATION;
-  // Timer écoulé → spawn boss si pas encore fait
-  if (elapsed >= duration && !gameState.boss) {
-    spawnBoss();
-    return false; // on ne finit pas, le boss doit être tué
-  }
-  // Boss en vie → la partie continue
-  if (gameState.boss && gameState.boss.alive) return false;
-  // Boss tué → fin
-  if (gameState.boss && !gameState.boss.alive) return 'bosskilled';
-  // Tous les joueurs morts (pas en respawn) → fin immédiate
+  // Tous les joueurs morts (pas en respawn) → fin immédiate (priorité max)
   if (gameState.players.size > 0) {
     let allDead = true;
     for (const p of gameState.players.values()) {
@@ -1191,6 +1186,15 @@ function checkWinCondition() {
     }
     if (allDead) return 'alldead';
   }
+  // Timer écoulé → spawn boss si pas encore fait
+  if (elapsed >= duration && !gameState.boss) {
+    spawnBoss();
+    return false; // on ne finit pas, le boss doit être tué
+  }
+  // Boss tué → fin
+  if (gameState.boss && !gameState.boss.alive) return 'bosskilled';
+  // Boss en vie → la partie continue
+  if (gameState.boss && gameState.boss.alive) return false;
   return false;
 }
 
