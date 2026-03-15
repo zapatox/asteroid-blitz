@@ -86,7 +86,7 @@ const RARITY_TABLE_SMALL = [
 const LOOT_TABLE = {
   common:    [{ type: 'crystal', weight: 3 }, { type: 'shield', weight: 3 }, { type: 'boost', weight: 2 }, { type: 'rapid', weight: 2 }],
   rare:      [{ type: 'trishot', weight: 3 }, { type: 'laser', weight: 2 }, { type: 'missile', weight: 2 }, { type: 'minigun', weight: 2 }],
-  epic:      [{ type: 'drone', weight: 2 }, { type: 'missile', weight: 2 }, { type: 'gravwell', weight: 2 }, { type: 'minigun', weight: 1 }],
+  epic:      [{ type: 'drone', weight: 2 }, { type: 'missile', weight: 2 }, { type: 'gravwell', weight: 2 }, { type: 'minigun', weight: 1 }, { type: 'extralife', weight: 1 }],
   legendary: [{ type: 'nuke', weight: 2 }, { type: 'magnet', weight: 2 }, { type: 'intangible', weight: 1 }],
 };
 
@@ -205,8 +205,8 @@ function createPlayer(id, name, index) {
     y: Math.sin(angle) * r,
     angle: angle + Math.PI,
     vx: 0, vy: 0,
-    hp: 3,
-    lives: 3,         // nombre de respawns restants (0 = mort définitive)
+    hp: 4,
+    lives: 2,         // nombre de vies (0 = mort définitive)
     score: 0,
     alive: true,
     respawnTimer: 0,
@@ -232,7 +232,7 @@ function killPlayer(p) {
   p.lives--;
   if (p.lives > 0) {
     p.respawnTimer = RESPAWN_TICKS;
-    p.hp = 3; // reset HP pour le prochain respawn
+    p.hp = 4; // reset HP pour le prochain respawn
   }
   // Si lives <= 0 : mort définitive, pas de respawnTimer
 }
@@ -361,11 +361,14 @@ function integratePlayer(p) {
 
   p.x += p.vx * DT;
   p.y += p.vy * DT;
-  // Bordure électrique : toucher le bord = mort
+  // Bordure électrique : toucher le bord = dégât + rebond
   const BORDER_MARGIN = HALF - 5;
   if (Math.abs(p.x) > BORDER_MARGIN || Math.abs(p.y) > BORDER_MARGIN) {
-    p.x = clamp(p.x, -HALF, HALF);
-    p.y = clamp(p.y, -HALF, HALF);
+    // Rebond : repousse le joueur vers le centre
+    if (p.x > BORDER_MARGIN)  { p.x = BORDER_MARGIN - 10; p.vx = -200; }
+    if (p.x < -BORDER_MARGIN) { p.x = -BORDER_MARGIN + 10; p.vx = 200; }
+    if (p.y > BORDER_MARGIN)  { p.y = BORDER_MARGIN - 10; p.vy = -200; }
+    if (p.y < -BORDER_MARGIN) { p.y = -BORDER_MARGIN + 10; p.vy = 200; }
     p.borderKill = true; // flag pour gameTick
   }
 
@@ -749,7 +752,7 @@ function checkAsteroidPlayerCollisions(events) {
           killPlayer(p);
           events.push({ type: 'player_killed', x: p.x, y: p.y, victimId: p.id, livesLeft: p.lives });
         } else {
-          p.respawnTimer = RESPAWN_TICKS;
+          p.effects.intangible = 30; // i-frames après hit
         }
         break;
       }
@@ -803,6 +806,8 @@ function checkPlayerPickupCollisions(events) {
           }
           gameState.asteroids.clear();
           events.push({ type: 'nuke_activated', x: p.x, y: p.y, byId: p.id, destroyed: nukeData });
+        } else if (pickup.type === 'extralife') {
+          p.lives++;
         }
         events.push({ type: 'pickup_collected', id: pickup.id, pickupType: pickup.type, rarity: pickup.rarity, x: pickup.x, y: pickup.y, byId: p.id });
         gameState.pickups.delete(pickup.id);
@@ -1207,11 +1212,12 @@ function gameTick(room) {
 
   for (const p of gameState.players.values()) integratePlayer(p);
 
-  // Bordures électriques : tuer les joueurs qui touchent
+  // Bordures électriques : dégât aux joueurs qui touchent
   for (const p of gameState.players.values()) {
-    if (!p.alive || p.respawnTimer > 0) continue;
-    if (p.borderKill) {
-      p.borderKill = false;
+    if (!p.borderKill) continue;
+    p.borderKill = false;
+    if (!p.alive || p.respawnTimer > 0 || p.effects.intangible > 0) continue;
+    {
       p.hp--;
       events.push({ type: 'player_hit', x: p.x, y: p.y, victimId: p.id, byId: null });
       events.push({ type: 'border_zap', x: p.x, y: p.y });
@@ -1219,7 +1225,7 @@ function gameTick(room) {
         killPlayer(p);
         events.push({ type: 'player_killed', x: p.x, y: p.y, victimId: p.id, livesLeft: p.lives });
       } else {
-        p.respawnTimer = RESPAWN_TICKS;
+        p.effects.intangible = 30; // i-frames après hit
       }
     }
   }
@@ -1396,7 +1402,7 @@ function resetLobby(room) {
   gameState.boss = null;
   gameState.tick = 0;
   for (const p of gameState.players.values()) {
-    p.hp = 3; p.lives = 3; p.score = 0; p.alive = true; p.respawnTimer = 0;
+    p.hp = 4; p.lives = 2; p.score = 0; p.alive = true; p.respawnTimer = 0;
     p.effects = { boost: 0, rapid: 0, laser: 0, missile: 0, trishot: 0, drone: 0, magnet: 0, intangible: 0, minigun: 0, gravwell: 0 };
     p.droneAngle = 0; p.droneShootCd = 0; p.gravwellX = 0; p.gravwellY = 0;
     p.killStreak = 0; p.comboTimer = 0; p.comboCount = 0;
@@ -1526,6 +1532,32 @@ Bun.serve({
       // ── Highscores ──────────────────────────────────────────────────────
       if (msg.type === 'get_highscores') {
         ws.send(JSON.stringify({ type: 'highscores', data: loadHighscores() }));
+      }
+
+      // ── Quitter la salle (retour menu) ──────────────────────────────────
+      if (msg.type === 'leave_room') {
+        const room = ws.room;
+        if (!room) return;
+        const id = ws.playerId;
+        const p = room.gameState.players.get(id);
+        if (p) console.log(`🚪 [${room.code}] ${p.name} a quitté.`);
+        room.gameState.players.delete(id);
+        room.wsSet.delete(ws);
+        ws.room = null;
+        ws.playerId = null;
+        if (room.gameState.players.size === 0) {
+          if (room.interval) clearInterval(room.interval);
+          rooms.delete(room.code);
+          console.log(`🗑️  [${room.code}] Salle supprimée (vide).`);
+        } else {
+          if (id === room.hostId) {
+            const newHost = room.gameState.players.values().next().value;
+            room.hostId = newHost.id;
+            console.log(`👑 [${room.code}] Nouveau host : ${newHost.name}`);
+          }
+          broadcastLobbyUpdate(room);
+        }
+        return;
       }
 
       // ── Rejouer (host uniquement, après gameover) ─────────────────────────

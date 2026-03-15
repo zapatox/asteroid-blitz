@@ -963,13 +963,13 @@ const PICKUP_COLORS = {
   crystal: 0x00ffff, shield: 0x00ff88, boost: 0xff8800, rapid: 0xff00ff,
   laser: 0x4488ff, missile: 0xff2266, trishot: 0x4488ff,
   drone: 0xbb44ff, nuke: 0xffaa00, magnet: 0xffaa00, intangible: 0xffaa00,
-  minigun: 0xff4444, gravwell: 0x8844ff,
+  minigun: 0xff4444, gravwell: 0x8844ff, extralife: 0xff44ff,
 };
 const PICKUP_LABELS = {
   crystal: '💎+30', shield: '🛡 HP+1', boost: '⚡ BOOST', rapid: '🔥 RAPID',
   laser: '⚡ LASER', missile: '🚀 MISSILE', trishot: '🔱 TRISHOT',
   drone: '🤖 DRONE', nuke: '💥 NUKE!', magnet: '🧲 MAGNET', intangible: '👻 GHOST',
-  minigun: '🔫 MINIGUN', gravwell: '🌀 GRAVITY',
+  minigun: '🔫 MINIGUN', gravwell: '🌀 GRAVITY', extralife: '❤️ +1 VIE',
 };
 
 function getOrCreatePickup(snap) {
@@ -1458,6 +1458,8 @@ function updateHUD(snap) {
       `<div class="hp-dot${i > p.hp ? ' dead' : ''}"></div>`
     ).join('');
 
+    const livesStr = p.alive ? '❤️'.repeat(p.lives) : '💀';
+
     const fx = [];
     if (p.boosted) fx.push('<span class="fx-badge boost">⚡</span>');
     if (p.rapid)   fx.push('<span class="fx-badge rapid">🔥</span>');
@@ -1466,7 +1468,7 @@ function updateHUD(snap) {
 
     card.innerHTML = `
       <div class="name">${p.name}</div>
-      <div class="hp-dots">${dots}</div>
+      <div class="hp-row"><span class="lives-display">${livesStr}</span><div class="hp-dots">${dots}</div></div>
       ${fx.join('')}
       <div class="crystals">💎 ${p.score}</div>
     `;
@@ -1806,6 +1808,7 @@ const roomCodeVal    = document.getElementById('room-code-val');
 const waitingPlayers = document.getElementById('waiting-players');
 const waitingStatus  = document.getElementById('waiting-status');
 const btnRestart     = document.getElementById('btn-restart');
+const btnMenu        = document.getElementById('btn-menu');
 
 let isHost = false;
 let myRoomCode = null;
@@ -1880,8 +1883,9 @@ function updateSettingsUI() {
 function toggleSettings() {
   const open = settingsPanel.style.display === 'flex';
   settingsPanel.style.display = open ? 'none' : 'flex';
-  // Afficher le curseur quand les options sont ouvertes en jeu
-  document.body.style.cursor = open ? 'none' : '';
+  // Cacher le curseur seulement si on ferme les options ET qu'on est en jeu (hud)
+  const inGame = hudEl.style.display === 'block' && screenGameover.style.display === 'none';
+  document.body.style.cursor = (open && inGame) ? 'none' : '';
 }
 
 toggleLayout.addEventListener('click', () => {
@@ -2113,6 +2117,14 @@ btnStartGame.addEventListener('click', () => {
 // Rejouer (après gameover — host uniquement côté serveur)
 btnRestart.addEventListener('click', () => {
   if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'restart' }));
+});
+
+// Retour au menu principal (quitte la salle)
+btnMenu.addEventListener('click', () => {
+  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'leave_room' }));
+  myRoomCode = null;
+  isHost = false;
+  showScreen('lobby');
 });
 
 // ─── Highscores ──────────────────────────────────────────────────────────────

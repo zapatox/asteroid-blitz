@@ -388,7 +388,7 @@ body::after {
   padding: 10px 20px;
   text-align: center;
   outline: none;
-  width: 160px;
+  width: 220px;
   letter-spacing: 16px;
   caret-color: var(--pink);
 }
@@ -600,6 +600,8 @@ button:active { transform: scale(0.97); }
   color: #fff;
   font-family: 'Press Start 2P', monospace;
 }
+.hp-row { display: flex; align-items: center; gap: 6px; }
+.lives-display { font-size: 0.6rem; letter-spacing: -2px; }
 .score-card .hp-dots { display: flex; gap: 3px; }
 .hp-dot {
   width: 7px; height: 7px;
