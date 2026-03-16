@@ -1401,36 +1401,9 @@ canvas.addEventListener('mouseleave', () => { mouseDown = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 let dashFrame = false;
 
-// ─── Prédiction locale (extrapolation simple) ────────────────────────────────
-
-let localPred = null;
-
-// Extrapolation : avancer la position avec la vélocité du serveur entre les snapshots
-function stepLocalPred(dt) {
-  if (!localPred) return;
-  localPred.x += localPred.vx * dt;
-  localPred.y += localPred.vy * dt;
-}
-
-// Mise à jour depuis le snapshot serveur : lerp doux vers la position extrapolée
-function updatePredFromServer(serverState) {
-  // Position cible = serveur (source de vérité)
-  const targetX = serverState.x;
-  const targetY = serverState.y;
-
-  if (!localPred) {
-    localPred = { x: targetX, y: targetY, vx: serverState.vx, vy: serverState.vy };
-  } else {
-    const dx = targetX - localPred.x, dy = targetY - localPred.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    // Grand écart (knockback/collision) → snap rapide, sinon correction douce
-    const alpha = dist > 50 ? 0.7 : 0.3;
-    localPred.x  = lerp(localPred.x, targetX, alpha);
-    localPred.y  = lerp(localPred.y, targetY, alpha);
-    localPred.vx = serverState.vx;
-    localPred.vy = serverState.vy;
-  }
-}
+// ─── Joueur local : même interpolation que les autres joueurs ─────────────────
+// Plus de prédiction/extrapolation séparée — on utilise lerpWrap(prev, curr, alpha)
+// directement dans updatePlayerMesh, identique aux autres joueurs.
 
 // ─── HUD ──────────────────────────────────────────────────────────────────────
 
@@ -1942,7 +1915,7 @@ function connect() {
     const msg = JSON.parse(e.data);
 
     if (msg.type === 'assign') {
-      myId = msg.id; myColor = msg.color; localPred = null;
+      myId = msg.id; myColor = msg.color;
     }
 
     if (msg.type === 'room_created') {
@@ -1981,7 +1954,7 @@ function connect() {
       gameDuration = msg.duration || 300;
       gameDifficulty = msg.difficulty || 'normal';
       showScreen('hud');
-      prevScores = {}; localPred = null;
+      prevScores = {};
       // Clear old enemy/boss meshes
       for (const [id] of enemyMeshes) removeEnemy(id);
       bossMesh = null;
@@ -1992,15 +1965,6 @@ function connect() {
       prevSnapshot = currSnapshot;
       currSnapshot = msg;
       lastSnapshotTime = performance.now();
-
-      const me = msg.players.find(p => p.id === myId);
-      if (me) {
-        if (!me.alive || me.respawnTimer > 0) {
-          localPred = null;
-        } else {
-          updatePredFromServer(me);
-        }
-      }
 
       const playerIds  = new Set(msg.players.map(p => p.id));
       const astIds     = new Set(msg.asteroids.map(a => a.id));
@@ -2206,14 +2170,8 @@ function animate(now) {
   if (currSnapshot && currSnapshot.phase === 'playing') {
     const alpha = Math.min((now - lastSnapshotTime) / SERVER_TICK, 1);
 
-    stepLocalPred(dt);
-
     for (const snap of currSnapshot.players) {
-      if (snap.id === myId && localPred && snap.alive && snap.respawnTimer === 0) {
-        updatePlayerMesh({ ...snap, x: localPred.x, y: localPred.y }, alpha);
-      } else {
-        updatePlayerMesh(snap, alpha);
-      }
+      updatePlayerMesh(snap, alpha);
     }
 
     for (const snap of currSnapshot.asteroids) updateAsteroidMesh(snap, alpha);
