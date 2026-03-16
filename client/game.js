@@ -1340,6 +1340,7 @@ function removeProjectile(id) {
   projectileMeshes.delete(id);
 }
 
+
 // Screen shake
 let shakeIntensity = 0;
 function triggerShake(power) { shakeIntensity = Math.max(shakeIntensity, power); }
