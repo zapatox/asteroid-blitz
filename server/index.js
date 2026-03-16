@@ -386,12 +386,11 @@ function integrateAsteroid(a) {
 
 function createProjectile(owner, weaponType) {
   const speed = weaponType === 'missile' ? MISSILE_SPEED : BULLET_SPEED;
-  const shootAngle = (owner.aimAngle != null) ? owner.aimAngle : owner.angle;
-  const dx = Math.cos(shootAngle), dy = Math.sin(shootAngle);
+  const dx = Math.cos(owner.angle), dy = Math.sin(owner.angle);
   const id = 'pr' + (gameState.nextProjId++);
   return {
     id, ownerId: owner.id, ownerColor: owner.color, type: weaponType,
-    x: owner.x + dx * 12, y: owner.y + dy * 12,
+    x: owner.x + dx * 5, y: owner.y + dy * 5,
     vx: dx * speed, vy: dy * speed,
     radius: weaponType === 'missile' ? MISSILE_RADIUS : BULLET_RADIUS,
   };
@@ -504,8 +503,7 @@ function processShots(events) {
       // Laser = hitscan instantané (satisfaisant comme rayon)
       p.effects.laser--;
       const bx = p.x, by = p.y;
-      const laserAngle = (p.aimAngle != null) ? p.aimAngle : p.angle;
-      const dx = Math.cos(laserAngle), dy = Math.sin(laserAngle);
+      const dx = Math.cos(p.angle), dy = Math.sin(p.angle);
       const hitAsts = [];
       for (const a of gameState.asteroids.values()) {
         const fx = a.x - bx, fy = a.y - by;
@@ -1530,14 +1528,12 @@ Bun.serve({
         p.left   = !!k.left;
         p.right  = !!k.right;
         p.shoot  = !!k.shoot;
-        if (k.aimAngle != null) p.aimAngle = k.aimAngle;
         if (k.selectedWeapon) p.selectedWeapon = k.selectedWeapon;
         // Dash (clic droit) — boost instantané dans la direction visée
         if (k.dash && p.alive && p.respawnTimer <= 0 && !p.dashCooldown) {
           const dashSpeed = 350;
-          const dashAngle = (p.aimAngle != null) ? p.aimAngle : p.angle;
-          p.vx += Math.cos(dashAngle) * dashSpeed;
-          p.vy += Math.sin(dashAngle) * dashSpeed;
+          p.vx += Math.cos(p.angle) * dashSpeed;
+          p.vy += Math.sin(p.angle) * dashSpeed;
           p.dashCooldown = 40; // 2s cooldown
         }
       }
