@@ -1396,19 +1396,18 @@ canvas.addEventListener('mouseleave', () => { mouseDown = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 let dashFrame = false;
 
-// ─── Prédiction locale ────────────────────────────────────────────────────────
+// ─── Prédiction locale + Server Reconciliation ───────────────────────────────
 
 const DRAG = 0.97, THRUST_FORCE = 320, TURN_SPEED = 2.8, MAX_SPEED = 200;
 const DT = SERVER_TICK / 1000;
 
 let localPred = null;
+const inputBuffer = []; // { seq, keys: {thrust,left,right}, dt }
 
-function stepLocalPred(dt) {
-  if (!localPred) return;
-  const p = localPred;
-  if (keys.left)  p.angle += TURN_SPEED * dt;
-  if (keys.right) p.angle -= TURN_SPEED * dt;
-  if (keys.thrust) {
+function applyInput(p, k, dt) {
+  if (k.left)  p.angle += TURN_SPEED * dt;
+  if (k.right) p.angle -= TURN_SPEED * dt;
+  if (k.thrust) {
     p.vx += Math.cos(p.angle) * THRUST_FORCE * dt;
     p.vy += Math.sin(p.angle) * THRUST_FORCE * dt;
   }
@@ -1418,11 +1417,32 @@ function stepLocalPred(dt) {
   if (spd > MAX_SPEED) { p.vx = p.vx/spd*MAX_SPEED; p.vy = p.vy/spd*MAX_SPEED; }
   p.x += p.vx * dt;
   p.y += p.vy * dt;
-  // Bordures électriques : pas de wrap, clamper
   if (p.x > 400) { p.x = 400; p.vx = 0; }
   if (p.x < -400) { p.x = -400; p.vx = 0; }
   if (p.y > 400) { p.y = 400; p.vy = 0; }
   if (p.y < -400) { p.y = -400; p.vy = 0; }
+}
+
+function stepLocalPred(dt) {
+  if (!localPred) return;
+  applyInput(localPred, keys, dt);
+}
+
+// Server reconciliation : rejouer les inputs non confirmés
+function reconcile(serverState, lastInputSeq) {
+  // Supprimer les inputs déjà traités par le serveur
+  while (inputBuffer.length > 0 && inputBuffer[0].seq <= lastInputSeq) {
+    inputBuffer.shift();
+  }
+  // Partir de l'état serveur autoritaire
+  localPred = {
+    x: serverState.x, y: serverState.y, angle: serverState.angle,
+    vx: serverState.vx, vy: serverState.vy,
+  };
+  // Rejouer tous les inputs non encore confirmés
+  for (const input of inputBuffer) {
+    applyInput(localPred, input.keys, input.dt);
+  }
 }
 
 // ─── HUD ──────────────────────────────────────────────────────────────────────
@@ -1935,7 +1955,7 @@ function connect() {
     const msg = JSON.parse(e.data);
 
     if (msg.type === 'assign') {
-      myId = msg.id; myColor = msg.color; localPred = null;
+      myId = msg.id; myColor = msg.color; localPred = null; inputBuffer.length = 0;
     }
 
     if (msg.type === 'room_created') {
@@ -1974,7 +1994,7 @@ function connect() {
       gameDuration = msg.duration || 300;
       gameDifficulty = msg.difficulty || 'normal';
       showScreen('hud');
-      prevScores = {}; localPred = null;
+      prevScores = {}; localPred = null; inputBuffer.length = 0;
       // Clear old enemy/boss meshes
       for (const [id] of enemyMeshes) removeEnemy(id);
       bossMesh = null;
@@ -1990,21 +2010,10 @@ function connect() {
       if (me) {
         if (!me.alive || me.respawnTimer > 0) {
           localPred = null;
+          inputBuffer.length = 0;
         } else {
-          if (!localPred) {
-            localPred = { x: me.x, y: me.y, angle: me.angle, vx: me.vx, vy: me.vy };
-          } else {
-            // Correction douce : si l'écart est faible, corriger peu (mouvement fluide)
-            // Si l'écart est grand (collision, knockback), corriger plus vite
-            const dx = me.x - localPred.x, dy = me.y - localPred.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-            const posAlpha = dist > 50 ? 0.6 : 0.15;
-            localPred.x     = lerp(localPred.x,     me.x,     posAlpha);
-            localPred.y     = lerp(localPred.y,     me.y,     posAlpha);
-            localPred.vx    = lerp(localPred.vx,    me.vx,    0.25);
-            localPred.vy    = lerp(localPred.vy,    me.vy,    0.25);
-            localPred.angle = lerpAngle(localPred.angle, me.angle, 0.2);
-          }
+          // Server reconciliation : prendre l'état serveur + rejouer inputs non confirmés
+          reconcile(me, msg.lastInputSeq || 0);
         }
       }
 
@@ -2050,7 +2059,13 @@ function startInputLoop() {
     const shootNow = keys.shoot || clickShootFrame || mouseDown;
     clickShootFrame = false;
     const dash = dashFrame; dashFrame = false;
-    ws.send(JSON.stringify({ type: 'input', seq: inputSeq++, keys: { ...keys, shoot: shootNow, dash, selectedWeapon } }));
+    const seq = inputSeq++;
+    const inputKeys = { thrust: keys.thrust, left: keys.left, right: keys.right, shoot: shootNow, dash, selectedWeapon };
+    ws.send(JSON.stringify({ type: 'input', seq, keys: inputKeys }));
+    // Stocker dans le buffer pour reconciliation (seulement mouvement)
+    inputBuffer.push({ seq, keys: { thrust: keys.thrust, left: keys.left, right: keys.right }, dt: DT });
+    // Limiter la taille du buffer (garder ~2s d'inputs max)
+    if (inputBuffer.length > 40) inputBuffer.shift();
   }, 50);
 }
 

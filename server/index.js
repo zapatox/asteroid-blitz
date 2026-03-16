@@ -222,6 +222,7 @@ function createPlayer(id, name, index) {
     killStreak: 0,       // kills sans mourir
     comboTimer: 0,       // ticks restants pour enchaîner un combo
     comboCount: 0,       // nombre de hits dans le combo actuel
+    lastInputSeq: 0,     // dernier seq d'input traité (pour reconciliation)
   };
 }
 
@@ -1280,8 +1281,15 @@ function gameTick(room) {
 
   gameState.tick++;
 
-  // Envoyer snapshot + events en un seul message JSON
-  broadcastRoom(room, { type: 'snapshot', ...buildSnapshot(), events });
+  // Envoyer snapshot + events — personnalisé par joueur (lastInputSeq pour reconciliation)
+  const snap = { type: 'snapshot', ...buildSnapshot(), events };
+  for (const ws of room.wsSet) {
+    if (ws.readyState !== 1) continue;
+    const p = gameState.players.get(ws.playerId);
+    const seq = p ? (p.lastInputSeq || 0) : 0;
+    snap.lastInputSeq = seq;
+    ws.send(JSON.stringify(snap));
+  }
 
   const winResult = checkWinCondition();
   if (winResult) endGame(room, winResult);
@@ -1514,6 +1522,7 @@ Bun.serve({
         if (!room) return;
         const p = room.gameState.players.get(ws.playerId);
         if (!p) return;
+        if (msg.seq != null) p.lastInputSeq = msg.seq;
         const k = msg.keys || {};
         p.thrust = !!k.thrust;
         p.left   = !!k.left;
