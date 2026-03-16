@@ -1405,6 +1405,74 @@ let dashFrame = false;
 // Plus de prédiction/extrapolation séparée — on utilise lerpWrap(prev, curr, alpha)
 // directement dans updatePlayerMesh, identique aux autres joueurs.
 
+// ─── Storm Warning Arrows (flèches rouges 3D) ───────────────────────────────
+
+const stormArrows = [];
+let stormWarningActive = false;
+let stormWarningStart = 0;
+
+function createArrowMesh() {
+  // Flèche : triangle pointant dans la direction
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 12);
+  shape.lineTo(-8, -6);
+  shape.lineTo(-3, -3);
+  shape.lineTo(-3, -12);
+  shape.lineTo(3, -12);
+  shape.lineTo(3, -3);
+  shape.lineTo(8, -6);
+  shape.closePath();
+  const geo = new THREE.ShapeGeometry(shape);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xff2222, transparent: true, opacity: 0.9, side: THREE.DoubleSide
+  });
+  return new THREE.Mesh(geo, mat);
+}
+
+function showStormWarning(dir) {
+  hideStormWarning();
+  stormWarningActive = true;
+  stormWarningStart = performance.now();
+  // dir: 0=vient de gauche→droite, 1=droite→gauche, 2=haut→bas, 3=bas→haut
+  const count = 5;
+  for (let i = 0; i < count; i++) {
+    const arrow = createArrowMesh();
+    const t = (i / (count - 1) - 0.5) * WORLD * 0.7;
+    if (dir === 0) { arrow.position.set(-HALF - 30, t, 5); arrow.rotation.z = -Math.PI / 2; }
+    else if (dir === 1) { arrow.position.set(HALF + 30, t, 5); arrow.rotation.z = Math.PI / 2; }
+    else if (dir === 2) { arrow.position.set(t, -HALF - 30, 5); arrow.rotation.z = 0; }
+    else { arrow.position.set(t, HALF + 30, 5); arrow.rotation.z = Math.PI; }
+    scene.add(arrow);
+    stormArrows.push(arrow);
+  }
+}
+
+function hideStormWarning() {
+  for (const a of stormArrows) {
+    scene.remove(a);
+    a.geometry.dispose();
+    a.material.dispose();
+  }
+  stormArrows.length = 0;
+  stormWarningActive = false;
+}
+
+function updateStormWarning() {
+  if (!stormWarningActive) return;
+  const elapsed = (performance.now() - stormWarningStart) / 1000;
+  // Clignotement rapide
+  const blink = Math.sin(elapsed * 8) > 0;
+  const opacity = blink ? 0.9 : 0.3;
+  for (const a of stormArrows) {
+    a.material.opacity = opacity;
+    // Pulse scale
+    const s = 1 + Math.sin(elapsed * 4) * 0.15;
+    a.scale.setScalar(s);
+  }
+  // Auto-hide après 4s (sécurité)
+  if (elapsed > 4) hideStormWarning();
+}
+
 // ─── HUD ──────────────────────────────────────────────────────────────────────
 
 const hudEl          = document.getElementById('hud');
@@ -1617,7 +1685,7 @@ function triggerPickupFlash(pickupType) {
 
 // ─── Gestion events serveur ───────────────────────────────────────────────────
 
-const EVENT_TYPES = new Set(['bolt','shot_fired','asteroid_destroyed','deflect','player_hit','player_killed','pickup_collected','missile_hit','border_zap','loot_dropped','nuke_activated','drone_shot','asteroid_storm','pickup_despawn','gravwell_placed','enemy_killed','boss_killed','boss_special']);
+const EVENT_TYPES = new Set(['bolt','shot_fired','asteroid_destroyed','deflect','player_hit','player_killed','pickup_collected','missile_hit','border_zap','loot_dropped','nuke_activated','drone_shot','asteroid_storm','asteroid_storm_warning','pickup_despawn','gravwell_placed','enemy_killed','boss_killed','boss_special']);
 
 function handleEvent(msg) {
   // Laser (hitscan) — dessiner le rayon instantané
@@ -1729,10 +1797,16 @@ function handleEvent(msg) {
     spawnExplosion(msg.x, msg.y, 5, 0xbb44ff);
   }
 
-  if (msg.type === 'asteroid_storm') {
-    showAnnouncement('ASTEROID STORM!', '#4488ff');
-    triggerShake(8);
+  if (msg.type === 'asteroid_storm_warning') {
+    // Afficher les flèches rouges d'avertissement pendant 3s
+    showStormWarning(msg.dir);
+    showAnnouncement('⚠ STORM INCOMING!', '#ff3333');
     playSound('explode');
+  }
+
+  if (msg.type === 'asteroid_storm') {
+    triggerShake(8);
+    hideStormWarning();
   }
 
   if (msg.type === 'pickup_despawn') {
@@ -1955,10 +2029,16 @@ function connect() {
       gameDifficulty = msg.difficulty || 'normal';
       showScreen('hud');
       prevScores = {};
-      // Clear old enemy/boss meshes
+      // Clear ALL game meshes on new game
       for (const [id] of enemyMeshes) removeEnemy(id);
-      bossMesh = null;
+      if (bossMesh) { scene.remove(bossMesh.group); bossMesh = null; }
       document.getElementById('boss-hud').style.display = 'none';
+      for (const [id] of asteroidMeshes) removeAsteroid(id);
+      for (const [id] of pickupMeshes) removePickup(id);
+      for (const [id] of projectileMeshes) removeProjectile(id);
+      for (const [id] of playerMeshes) removePlayer(id);
+      hideStormWarning();
+      prevSnapshot = null; currSnapshot = null;
     }
 
     if (msg.type === 'snapshot') {
@@ -1990,6 +2070,10 @@ function connect() {
           ${i === 0 ? '🏆' : `#${i+1}`} ${s.name} — ${s.score} 💎
         </div>`
       ).join('');
+      // Nettoyage visuel
+      if (bossMesh) { scene.remove(bossMesh.group); bossMesh = null; }
+      document.getElementById('boss-hud').style.display = 'none';
+      hideStormWarning();
     }
 
     if (msg.type === 'highscores') {
@@ -2186,6 +2270,7 @@ function animate(now) {
 
   updateParticles(dt);
   updateLasers(dt);
+  updateStormWarning();
   updateBorderArcs();
   // Flash border zap
   if (borderZapIntensity > 0) {

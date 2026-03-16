@@ -378,8 +378,19 @@ function integratePlayer(p) {
 
 function integrateAsteroid(a) {
   a.angle += a.angularVel * DT;
-  a.x = wrap(a.x + a.vx * DT, HALF);
-  a.y = wrap(a.y + a.vy * DT, HALF);
+  if (a.storm) {
+    // Storm asteroids : avancent en ligne droite, pas de wrap
+    a.x += a.vx * DT;
+    a.y += a.vy * DT;
+    // Marqué pour suppression quand sorti de l'autre côté
+    const margin = HALF + 50;
+    if (a.x > margin || a.x < -margin || a.y > margin || a.y < -margin) {
+      a.expired = true;
+    }
+  } else {
+    a.x = wrap(a.x + a.vx * DT, HALF);
+    a.y = wrap(a.y + a.vy * DT, HALF);
+  }
 }
 
 // ─── Projectiles & Combat ─────────────────────────────────────────────────────
@@ -1252,6 +1263,10 @@ function gameTick(room) {
   integrateMinigun(events);
   applyGravwell(events);
   for (const a of gameState.asteroids.values()) integrateAsteroid(a);
+  // Supprimer les astéroïdes de tempête qui ont traversé
+  for (const [id, a] of gameState.asteroids) {
+    if (a.expired) gameState.asteroids.delete(id);
+  }
   checkAsteroidCollisions();
   checkAsteroidPlayerCollisions(events);
   applyMagnet();
@@ -1269,14 +1284,55 @@ function gameTick(room) {
   // Boss
   integrateBoss(events);
 
-  // Asteroid Storm : toutes les 30s, une vague dense d'astéroïdes (pas pendant boss)
-  if (gameState.tick > 0 && gameState.tick % 600 === 0) {
-    const stormCount = 6 + Math.floor(Math.random() * 4);
+  // Asteroid Storm : toutes les 30s, une vague dense d'un côté (pas pendant boss)
+  // Warning 3s avant (tick % 600 === 540)
+  if (gameState.tick > 0 && gameState.tick % 600 === 540 && !gameState.boss) {
+    // Choisir direction : 0=droite, 1=gauche, 2=bas, 3=haut
+    gameState.stormDir = Math.floor(Math.random() * 4);
+    events.push({ type: 'asteroid_storm_warning', dir: gameState.stormDir });
+  }
+  // Spawn effectif 3s après le warning
+  if (gameState.tick > 0 && gameState.tick % 600 === 0 && !gameState.boss) {
+    const dir = gameState.stormDir ?? 0;
+    // Intensité augmente avec le temps et la difficulté
+    const elapsed = gameState.startTime ? (Date.now() - gameState.startTime) / 1000 : 0;
+    const timeFactor = Math.floor(elapsed / 60); // +1 par minute écoulée
+    const diffBonus = gameState.settings.difficulty === 'hardcore' ? 4 : gameState.settings.difficulty === 'normal' ? 2 : 0;
+    const stormCount = 6 + diffBonus + timeFactor * 2 + Math.floor(Math.random() * 3);
     for (let i = 0; i < stormCount; i++) {
-      const a = spawnAsteroid();
+      const sizes = [
+        { radius: 32, hp: 3, crystal: 50, weight: 2 },
+        { radius: 20, hp: 2, crystal: 25, weight: 4 },
+        { radius: 10, hp: 1, crystal: 10, weight: 3 },
+      ];
+      const total = sizes.reduce((s, x) => s + x.weight, 0);
+      let r = Math.random() * total, chosen = sizes[0];
+      for (const s of sizes) { r -= s.weight; if (r <= 0) { chosen = s; break; } }
+
+      // Spawn sur le bord source, dispersé le long du bord
+      let x, y;
+      const spread = (Math.random() - 0.5) * WORLD * 0.8;
+      const speed = 60 + Math.random() * 80;
+      let vx, vy;
+      // dir: 0=vient de gauche→droite, 1=droite→gauche, 2=haut→bas, 3=bas→haut
+      const drift = (Math.random() - 0.5) * 40; // légère déviation
+      if (dir === 0) { x = -HALF - 20; y = spread; vx = speed; vy = drift; }
+      else if (dir === 1) { x = HALF + 20; y = spread; vx = -speed; vy = drift; }
+      else if (dir === 2) { x = spread; y = -HALF - 20; vx = drift; vy = speed; }
+      else { x = spread; y = HALF + 20; vx = drift; vy = -speed; }
+
+      const id = 'a' + (gameState.nextAsteroidId++);
+      const a = {
+        id, x, y, vx, vy,
+        angle: Math.random() * Math.PI * 2,
+        angularVel: (Math.random() - 0.5) * 3,
+        radius: chosen.radius, hp: chosen.hp, maxHp: chosen.hp,
+        crystalValue: chosen.crystal, loot: null,
+        storm: true, // marqué comme astéroïde de tempête
+      };
       gameState.asteroids.set(a.id, a);
     }
-    events.push({ type: 'asteroid_storm' });
+    events.push({ type: 'asteroid_storm', dir });
   }
 
   gameState.tick++;
