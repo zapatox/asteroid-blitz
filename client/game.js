@@ -2249,7 +2249,7 @@ function animate(now) {
 
     for (const snap of currSnapshot.players) {
       if (snap.id === myId && localPred && snap.alive && snap.respawnTimer === 0) {
-        updatePlayerMesh({ ...snap, x: localPred.x, y: localPred.y, angle: localPred.angle }, 1);
+        updatePlayerMesh({ ...snap, x: localPred.x, y: localPred.y }, alpha);
       } else {
         updatePlayerMesh(snap, alpha);
       }
