@@ -1428,20 +1428,35 @@ function stepLocalPred(dt) {
   applyInput(localPred, keys, dt);
 }
 
-// Server reconciliation : rejouer les inputs non confirmés
+// Server reconciliation : rejouer les inputs non confirmés, puis blend
 function reconcile(serverState, lastInputSeq) {
   // Supprimer les inputs déjà traités par le serveur
   while (inputBuffer.length > 0 && inputBuffer[0].seq <= lastInputSeq) {
     inputBuffer.shift();
   }
-  // Partir de l'état serveur autoritaire
-  localPred = {
+  // Calculer la position réconciliée (serveur + replay)
+  const recon = {
     x: serverState.x, y: serverState.y, angle: serverState.angle,
     vx: serverState.vx, vy: serverState.vy,
   };
-  // Rejouer tous les inputs non encore confirmés
   for (const input of inputBuffer) {
-    applyInput(localPred, input.keys, input.dt);
+    applyInput(recon, input.keys, input.dt);
+  }
+
+  if (!localPred) {
+    // Première fois : snap direct
+    localPred = recon;
+  } else {
+    // Blend : si l'écart est petit, corriger doucement (pas de jitter)
+    // Si l'écart est gros (collision/knockback), corriger plus vite
+    const dx = recon.x - localPred.x, dy = recon.y - localPred.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const alpha = dist > 60 ? 0.8 : dist > 20 ? 0.3 : 0.15;
+    localPred.x     = lerp(localPred.x,     recon.x,     alpha);
+    localPred.y     = lerp(localPred.y,     recon.y,     alpha);
+    localPred.vx    = lerp(localPred.vx,    recon.vx,    0.3);
+    localPred.vy    = lerp(localPred.vy,    recon.vy,    0.3);
+    localPred.angle = lerpAngle(localPred.angle, recon.angle, 0.3);
   }
 }
 
