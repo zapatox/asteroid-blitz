@@ -78,6 +78,16 @@
       <button class="btn-settings-small" onclick="document.getElementById('settings-panel').style.display='flex'">⚙ Options</button>
       <button class="btn-settings-small" id="btn-highscores">🏆 Scores</button>
     </div>
+
+    <div id="version-box">
+      <div id="version-header" onclick="document.getElementById('changelog').classList.toggle('open')">
+        <span id="version-tag">v0.3.0</span>
+        <span id="version-arrow">▼</span>
+      </div>
+      <div id="changelog">
+        <div class="cl-entry">Ennemis IA + Boss fight 3 phases<br>Système de vies (2 vies × 4 HP), extra life pickup<br>Highscores par difficulté/durée<br>Musique MP3 (menu + in-game)<br>Prédiction client améliorée</div>
+      </div>
+    </div>
   </div>
 
   <!-- Tableau des Highscores -->

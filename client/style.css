@@ -370,6 +370,63 @@ body::after {
   flex-wrap: wrap;
 }
 
+/* ── Version / Changelog ─────────────────────────────── */
+#version-box {
+  margin-top: 14px;
+  text-align: center;
+}
+#version-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 4px 12px;
+  border: 1px solid rgba(0,255,255,0.2);
+  border-radius: 4px;
+  background: rgba(0,255,255,0.04);
+  transition: border-color 0.2s;
+}
+#version-header:hover { border-color: var(--cyan); }
+#version-tag {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.5rem;
+  color: var(--cyan);
+  letter-spacing: 1px;
+}
+#version-arrow {
+  font-size: 0.5rem;
+  color: rgba(0,255,255,0.4);
+  transition: transform 0.3s;
+}
+#changelog.open + #version-header #version-arrow,
+#version-box:has(#changelog.open) #version-arrow {
+  transform: rotate(180deg);
+}
+#changelog {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease;
+  text-align: left;
+  margin-top: 0;
+}
+#changelog.open {
+  max-height: 300px;
+  margin-top: 8px;
+}
+.cl-entry {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.38rem;
+  line-height: 1.8;
+  color: rgba(255,255,255,0.5);
+  padding: 6px 10px;
+  border-left: 2px solid rgba(0,255,255,0.2);
+  margin-bottom: 6px;
+}
+.cl-ver {
+  color: var(--pink);
+  font-weight: bold;
+}
+
 /* ── Écran rejoindre ─────────────────────────────────── */
 .join-label {
   font-size: 0.65rem;
