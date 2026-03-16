@@ -388,13 +388,10 @@ function createProjectile(owner, weaponType) {
   const speed = weaponType === 'missile' ? MISSILE_SPEED : BULLET_SPEED;
   const shootAngle = (owner.aimAngle != null) ? owner.aimAngle : owner.angle;
   const dx = Math.cos(shootAngle), dy = Math.sin(shootAngle);
-  // Utiliser la position prédite du client si dispo (évite que les tirs partent de derrière)
-  const ox = (owner.aimX != null) ? owner.aimX : owner.x;
-  const oy = (owner.aimY != null) ? owner.aimY : owner.y;
   const id = 'pr' + (gameState.nextProjId++);
   return {
     id, ownerId: owner.id, ownerColor: owner.color, type: weaponType,
-    x: ox + dx * 5, y: oy + dy * 5,
+    x: owner.x + dx * 18, y: owner.y + dy * 18,
     vx: dx * speed, vy: dy * speed,
     radius: weaponType === 'missile' ? MISSILE_RADIUS : BULLET_RADIUS,
   };
@@ -506,8 +503,7 @@ function processShots(events) {
     else if (weaponType === 'laser') {
       // Laser = hitscan instantané (satisfaisant comme rayon)
       p.effects.laser--;
-      const bx = (p.aimX != null) ? p.aimX : p.x;
-      const by = (p.aimY != null) ? p.aimY : p.y;
+      const bx = p.x, by = p.y;
       const laserAngle = (p.aimAngle != null) ? p.aimAngle : p.angle;
       const dx = Math.cos(laserAngle), dy = Math.sin(laserAngle);
       const hitAsts = [];
@@ -1535,13 +1531,6 @@ Bun.serve({
         p.right  = !!k.right;
         p.shoot  = !!k.shoot;
         if (k.aimAngle != null) p.aimAngle = k.aimAngle;
-        if (k.aimX != null && k.aimY != null) {
-          // Anti-triche : limiter l'écart aim vs position serveur (max 80 unités)
-          const adx = k.aimX - p.x, ady = k.aimY - p.y;
-          const adist = Math.sqrt(adx*adx + ady*ady);
-          if (adist < 80) { p.aimX = k.aimX; p.aimY = k.aimY; }
-          else { p.aimX = p.x; p.aimY = p.y; }
-        }
         if (k.selectedWeapon) p.selectedWeapon = k.selectedWeapon;
         // Dash (clic droit) — boost instantané dans la direction visée
         if (k.dash && p.alive && p.respawnTimer <= 0 && !p.dashCooldown) {
