@@ -1181,6 +1181,11 @@ button:active { transform: scale(0.97); }
   font-size: 0.4rem;
   opacity: 0.35;
 }
+.hs-version {
+  font-size: 0.35rem;
+  opacity: 0.3;
+  color: var(--cyan);
+}
 
 .hs-empty {
   text-align: center;

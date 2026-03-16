@@ -1,6 +1,7 @@
 // Asteroid Blitz — Serveur autoritaire Bun WebSockets (multi-salles)
 // Lancer : bun run server/index.js
 
+const GAME_VERSION = 'v0.4.0';
 const PORT = process.env.PORT || 3000;
 const TICK_MS = 50;
 const WORLD = 800;
@@ -29,7 +30,7 @@ function addHighscore(name, score, difficulty, duration) {
   const data = loadHighscores();
   const key = getScoreKey(difficulty, duration);
   if (!data[key]) data[key] = [];
-  data[key].push({ name, score, date: Date.now() });
+  data[key].push({ name, score, date: Date.now(), version: GAME_VERSION });
   data[key].sort((a, b) => b.score - a.score);
   data[key] = data[key].slice(0, MAX_HIGHSCORES);
   saveHighscores(data);

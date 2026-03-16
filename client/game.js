@@ -2226,11 +2226,13 @@ function renderHighscores() {
     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i+1}`;
     const d = new Date(s.date);
     const dateStr = `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}`;
+    const ver = s.version ? `<span class="hs-version">${s.version}</span>` : '';
     return `<div class="hs-entry">
       <span class="hs-rank">${medal}</span>
       <span class="hs-name">${s.name}</span>
       <span class="hs-score">${s.score} 💎</span>
       <span class="hs-date">${dateStr}</span>
+      ${ver}
     </div>`;
   }).join('');
 }
