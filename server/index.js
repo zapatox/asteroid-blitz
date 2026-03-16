@@ -97,8 +97,8 @@ const ENEMY_SHOOT_CD_HARD = 20;  // ~1s en hardcore
 const ENEMY_DETECT_RANGE = 300;
 const ENEMY_SPEED = 100;
 const ENEMY_SPEED_HARD = 150;
-const ENEMY_HP = 4;
-const ENEMY_HP_HARD = 6;
+const ENEMY_HP = 2;
+const ENEMY_HP_HARD = 5;
 const ENEMY_RESPAWN_TICKS = 200;  // 10s
 const ENEMY_KILL_SCORE = 50;
 

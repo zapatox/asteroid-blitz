@@ -1994,11 +1994,16 @@ function connect() {
           if (!localPred) {
             localPred = { x: me.x, y: me.y, angle: me.angle, vx: me.vx, vy: me.vy };
           } else {
-            localPred.x     = lerp(localPred.x,     me.x,     0.3);
-            localPred.y     = lerp(localPred.y,     me.y,     0.3);
-            localPred.vx    = lerp(localPred.vx,    me.vx,    0.4);
-            localPred.vy    = lerp(localPred.vy,    me.vy,    0.4);
-            localPred.angle = lerpAngle(localPred.angle, me.angle, 0.35);
+            // Correction douce : si l'écart est faible, corriger peu (mouvement fluide)
+            // Si l'écart est grand (collision, knockback), corriger plus vite
+            const dx = me.x - localPred.x, dy = me.y - localPred.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const posAlpha = dist > 50 ? 0.6 : 0.15;
+            localPred.x     = lerp(localPred.x,     me.x,     posAlpha);
+            localPred.y     = lerp(localPred.y,     me.y,     posAlpha);
+            localPred.vx    = lerp(localPred.vx,    me.vx,    0.25);
+            localPred.vy    = lerp(localPred.vy,    me.vy,    0.25);
+            localPred.angle = lerpAngle(localPred.angle, me.angle, 0.2);
           }
         }
       }
