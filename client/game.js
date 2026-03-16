@@ -1401,67 +1401,34 @@ canvas.addEventListener('mouseleave', () => { mouseDown = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 let dashFrame = false;
 
-// ─── Prédiction locale + Server Reconciliation ───────────────────────────────
-
-const DRAG = 0.97, THRUST_FORCE = 320, TURN_SPEED = 2.8, MAX_SPEED = 200;
-const DT = SERVER_TICK / 1000;
+// ─── Prédiction locale (extrapolation simple) ────────────────────────────────
 
 let localPred = null;
-const inputBuffer = []; // { seq, keys: {thrust,left,right}, dt }
 
-function applyInput(p, k, dt) {
-  if (k.left)  p.angle += TURN_SPEED * dt;
-  if (k.right) p.angle -= TURN_SPEED * dt;
-  if (k.thrust) {
-    p.vx += Math.cos(p.angle) * THRUST_FORCE * dt;
-    p.vy += Math.sin(p.angle) * THRUST_FORCE * dt;
-  }
-  p.vx *= Math.pow(DRAG, dt / DT);
-  p.vy *= Math.pow(DRAG, dt / DT);
-  const spd = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
-  if (spd > MAX_SPEED) { p.vx = p.vx/spd*MAX_SPEED; p.vy = p.vy/spd*MAX_SPEED; }
-  p.x += p.vx * dt;
-  p.y += p.vy * dt;
-  if (p.x > 400) { p.x = 400; p.vx = 0; }
-  if (p.x < -400) { p.x = -400; p.vx = 0; }
-  if (p.y > 400) { p.y = 400; p.vy = 0; }
-  if (p.y < -400) { p.y = -400; p.vy = 0; }
-}
-
+// Extrapolation : avancer la position avec la vélocité du serveur entre les snapshots
 function stepLocalPred(dt) {
   if (!localPred) return;
-  applyInput(localPred, keys, dt);
+  localPred.x += localPred.vx * dt;
+  localPred.y += localPred.vy * dt;
 }
 
-// Server reconciliation : rejouer les inputs non confirmés, puis blend
-function reconcile(serverState, lastInputSeq) {
-  // Supprimer les inputs déjà traités par le serveur
-  while (inputBuffer.length > 0 && inputBuffer[0].seq <= lastInputSeq) {
-    inputBuffer.shift();
-  }
-  // Calculer la position réconciliée (serveur + replay)
-  const recon = {
-    x: serverState.x, y: serverState.y, angle: serverState.angle,
-    vx: serverState.vx, vy: serverState.vy,
-  };
-  for (const input of inputBuffer) {
-    applyInput(recon, input.keys, input.dt);
-  }
+// Mise à jour depuis le snapshot serveur : lerp doux vers la position extrapolée
+function updatePredFromServer(serverState) {
+  // Position cible = serveur (source de vérité)
+  const targetX = serverState.x;
+  const targetY = serverState.y;
 
   if (!localPred) {
-    // Première fois : snap direct
-    localPred = recon;
+    localPred = { x: targetX, y: targetY, vx: serverState.vx, vy: serverState.vy };
   } else {
-    // Blend : si l'écart est petit, corriger doucement (pas de jitter)
-    // Si l'écart est gros (collision/knockback), corriger plus vite
-    const dx = recon.x - localPred.x, dy = recon.y - localPred.y;
+    const dx = targetX - localPred.x, dy = targetY - localPred.y;
     const dist = Math.sqrt(dx*dx + dy*dy);
-    const alpha = dist > 60 ? 0.8 : dist > 20 ? 0.3 : 0.15;
-    localPred.x     = lerp(localPred.x,     recon.x,     alpha);
-    localPred.y     = lerp(localPred.y,     recon.y,     alpha);
-    localPred.vx    = lerp(localPred.vx,    recon.vx,    0.3);
-    localPred.vy    = lerp(localPred.vy,    recon.vy,    0.3);
-    localPred.angle = lerpAngle(localPred.angle, recon.angle, 0.3);
+    // Grand écart (knockback/collision) → snap rapide, sinon correction douce
+    const alpha = dist > 50 ? 0.7 : 0.3;
+    localPred.x  = lerp(localPred.x, targetX, alpha);
+    localPred.y  = lerp(localPred.y, targetY, alpha);
+    localPred.vx = serverState.vx;
+    localPred.vy = serverState.vy;
   }
 }
 
@@ -1975,7 +1942,7 @@ function connect() {
     const msg = JSON.parse(e.data);
 
     if (msg.type === 'assign') {
-      myId = msg.id; myColor = msg.color; localPred = null; inputBuffer.length = 0;
+      myId = msg.id; myColor = msg.color; localPred = null;
     }
 
     if (msg.type === 'room_created') {
@@ -2014,7 +1981,7 @@ function connect() {
       gameDuration = msg.duration || 300;
       gameDifficulty = msg.difficulty || 'normal';
       showScreen('hud');
-      prevScores = {}; localPred = null; inputBuffer.length = 0;
+      prevScores = {}; localPred = null;
       // Clear old enemy/boss meshes
       for (const [id] of enemyMeshes) removeEnemy(id);
       bossMesh = null;
@@ -2030,10 +1997,8 @@ function connect() {
       if (me) {
         if (!me.alive || me.respawnTimer > 0) {
           localPred = null;
-          inputBuffer.length = 0;
         } else {
-          // Server reconciliation : prendre l'état serveur + rejouer inputs non confirmés
-          reconcile(me, msg.lastInputSeq || 0);
+          updatePredFromServer(me);
         }
       }
 
@@ -2082,10 +2047,6 @@ function startInputLoop() {
     const seq = inputSeq++;
     const inputKeys = { thrust: keys.thrust, left: keys.left, right: keys.right, shoot: shootNow, dash, selectedWeapon };
     ws.send(JSON.stringify({ type: 'input', seq, keys: inputKeys }));
-    // Stocker dans le buffer pour reconciliation (seulement mouvement)
-    inputBuffer.push({ seq, keys: { thrust: keys.thrust, left: keys.left, right: keys.right }, dt: DT });
-    // Limiter la taille du buffer (garder ~2s d'inputs max)
-    if (inputBuffer.length > 40) inputBuffer.shift();
   }, 50);
 }
 
