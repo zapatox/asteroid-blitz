@@ -810,21 +810,25 @@ function getOrCreateAsteroid(snap) {
   return obj;
 }
 
-function updateAsteroidMesh(snap) {
+function updateAsteroidMesh(snap, alpha) {
   const obj = getOrCreateAsteroid(snap);
   const { mesh, ghosts } = obj;
 
-  // ── Smooth-follow avec correction de wrap ─────────────────────────────────
-  // Remplace l'interpolation alpha : pas de saut au changement de snapshot
-  let dx = snap.x - obj.dispX;
-  let dy = snap.y - obj.dispY;
-  if (dx >  HALF) dx -= WORLD;   // chemin court via le bord droit
+  // ── Extrapolation basée sur la vélocité ───────────────────────────────────
+  // Position cible = position serveur + vélocité × temps écoulé depuis le snapshot
+  const extTime = alpha * (SERVER_TICK / 1000); // temps écoulé en secondes
+  const targetX = snap.x + (snap.vx || 0) * extTime;
+  const targetY = snap.y + (snap.vy || 0) * extTime;
+
+  let dx = targetX - obj.dispX;
+  let dy = targetY - obj.dispY;
+  if (dx >  HALF) dx -= WORLD;
   if (dx < -HALF) dx += WORLD;
   if (dy >  HALF) dy -= WORLD;
   if (dy < -HALF) dy += WORLD;
-  obj.dispX += dx * SMOOTH_AST;
-  obj.dispY += dy * SMOOTH_AST;
-  // Wrap-clip : évite la dérive au-delà de la zone de fondu → transition invisible
+  // Lerp plus agressif (0.5) car l'extrapolation donne une cible précise
+  obj.dispX += dx * 0.5;
+  obj.dispY += dy * 0.5;
   if (obj.dispX >  HALF + GHOST_FADE) obj.dispX -= WORLD;
   if (obj.dispX < -(HALF + GHOST_FADE)) obj.dispX += WORLD;
   if (obj.dispY >  HALF + GHOST_FADE) obj.dispY -= WORLD;
@@ -2250,7 +2254,7 @@ function animate(now) {
       }
     }
 
-    for (const snap of currSnapshot.asteroids) updateAsteroidMesh(snap); // smooth-follow, pas d'alpha
+    for (const snap of currSnapshot.asteroids) updateAsteroidMesh(snap, alpha);
     for (const snap of (currSnapshot.pickups || []))  updatePickupMesh(snap);
     for (const snap of (currSnapshot.projectiles || [])) updateProjectileMesh(snap, dt);
     for (const snap of (currSnapshot.enemies || []))  updateEnemyMesh(snap, alpha);
