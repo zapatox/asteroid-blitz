@@ -2080,7 +2080,9 @@ function startInputLoop() {
     const dash = dashFrame; dashFrame = false;
     const seq = inputSeq++;
     const aimAngle = localPred ? localPred.angle : null;
-    const inputKeys = { thrust: keys.thrust, left: keys.left, right: keys.right, shoot: shootNow, dash, selectedWeapon, aimAngle };
+    const aimX = localPred ? localPred.x : null;
+    const aimY = localPred ? localPred.y : null;
+    const inputKeys = { thrust: keys.thrust, left: keys.left, right: keys.right, shoot: shootNow, dash, selectedWeapon, aimAngle, aimX, aimY };
     ws.send(JSON.stringify({ type: 'input', seq, keys: inputKeys }));
     // Stocker dans le buffer pour reconciliation (seulement mouvement)
     inputBuffer.push({ seq, keys: { thrust: keys.thrust, left: keys.left, right: keys.right }, dt: DT });
