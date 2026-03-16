@@ -391,7 +391,7 @@ function createProjectile(owner, weaponType) {
   const id = 'pr' + (gameState.nextProjId++);
   return {
     id, ownerId: owner.id, ownerColor: owner.color, type: weaponType,
-    x: owner.x + dx * 18, y: owner.y + dy * 18,
+    x: owner.x + dx * 14, y: owner.y + dy * 14, // 14 = nez du vaisseau (vertex 0)
     vx: dx * speed, vy: dy * speed,
     radius: weaponType === 'missile' ? MISSILE_RADIUS : BULLET_RADIUS,
   };
