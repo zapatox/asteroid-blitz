@@ -1,7 +1,17 @@
 // Asteroid Blitz — Serveur autoritaire Bun WebSockets (multi-salles)
 // Lancer : bun run server/index.js
 
-const GAME_VERSION = 'v0.4.0';
+const GAME_VERSION = 'v0.5.0';
+
+// Wave system
+const WAVE_CONFIG = {
+  easy:     { waveSec: 50, bossWave: 10, enemyStartWave: 999, stormStartWave: 4 },
+  normal:   { waveSec: 45, bossWave: 8,  enemyStartWave: 3,   stormStartWave: 3 },
+  hardcore: { waveSec: 40, bossWave: 6,  enemyStartWave: 2,   stormStartWave: 2 },
+};
+const INTERMISSION_TICKS = 60;   // 3s
+const SHOP_TIMEOUT_TICKS = 600;  // 30s max
+
 const PORT = process.env.PORT || 3000;
 const TICK_MS = 50;
 const WORLD = 800;
@@ -25,17 +35,16 @@ function loadHighscores() {
 function saveHighscores(data) {
   fs.writeFileSync(HIGHSCORES_FILE, JSON.stringify(data, null, 2));
 }
-function getScoreKey(difficulty, duration) { return `${difficulty}_${duration}`; }
-function addHighscore(name, score, difficulty, duration) {
+function getScoreKey(difficulty, bossWave) { return `${difficulty}_wave${bossWave}`; }
+function addHighscore(name, score, difficulty, bossWave) {
   const data = loadHighscores();
-  const key = getScoreKey(difficulty, duration);
+  const key = getScoreKey(difficulty, bossWave);
   if (!data[key]) data[key] = [];
   data[key].push({ name, score, date: Date.now(), version: GAME_VERSION });
   data[key].sort((a, b) => b.score - a.score);
   data[key] = data[key].slice(0, MAX_HIGHSCORES);
   saveHighscores(data);
 }
-const GAME_DURATION = 300;
 const EFFECT_TICKS_BOOST = 120;  // 6s
 const EFFECT_TICKS_RAPID = 100;  // 5s
 const LASER_AMMO = 8;           // nombre de tirs laser par pickup
@@ -84,12 +93,16 @@ const RARITY_TABLE_SMALL = [
   { rarity: 'epic',      color: '#bb44ff', weight: 1 },
 ];
 
+// Loot drops : tactique immédiat. Items stratégiques (extralife, drone, magnet, gravwell) = shop only
 const LOOT_TABLE = {
-  common:    [{ type: 'crystal', weight: 3 }, { type: 'shield', weight: 3 }, { type: 'boost', weight: 2 }, { type: 'rapid', weight: 2 }],
+  common:    [{ type: 'crystal', weight: 4 }, { type: 'shield', weight: 3 }, { type: 'boost', weight: 2 }, { type: 'rapid', weight: 2 }],
   rare:      [{ type: 'trishot', weight: 3 }, { type: 'laser', weight: 2 }, { type: 'missile', weight: 2 }, { type: 'minigun', weight: 2 }],
-  epic:      [{ type: 'drone', weight: 2 }, { type: 'missile', weight: 2 }, { type: 'gravwell', weight: 2 }, { type: 'minigun', weight: 1 }, { type: 'extralife', weight: 1 }],
-  legendary: [{ type: 'nuke', weight: 2 }, { type: 'magnet', weight: 2 }, { type: 'intangible', weight: 1 }],
+  epic:      [{ type: 'minigun', weight: 2 }, { type: 'missile', weight: 2 }, { type: 'trishot', weight: 2 }],
+  legendary: [{ type: 'nuke', weight: 3 }, { type: 'intangible', weight: 2 }],
 };
+// Ammo drops donnent des petites quantités (shop donne plus)
+const DROP_AMMO = { laser: 3, missile: 1, trishot: 10, minigun: 30 };
+const REROLL_BASE_COST = 25;  // coût initial du reroll, +25 à chaque reroll
 
 // IA Ennemis
 const ENEMY_RADIUS = 14;
@@ -110,6 +123,23 @@ const BOSS_SHOOT_CD = 6;       // rafale rapide
 const BOSS_PHASE_TICKS = 160;  // ~8s par phase
 const BOSS_SPECIAL_CD = 300;   // 15s entre spéciaux
 const BOSS_CONTACT_DAMAGE = 2;
+
+const SHOP_POOL = [
+  { id: 'laser_ammo',   cat: 'weapon',  name: 'Laser +8',          price: 80,  icon: '⚡', desc: '+8 tirs laser' },
+  { id: 'missile_ammo', cat: 'weapon',  name: 'Missiles +3',       price: 100, icon: '🚀', desc: '+3 missiles' },
+  { id: 'trishot_ammo', cat: 'weapon',  name: 'Trishot +30',       price: 70,  icon: '🔱', desc: '+30 tirs triples' },
+  { id: 'minigun_ammo', cat: 'weapon',  name: 'Minigun +80',       price: 90,  icon: '🔫', desc: '+80 balles minigun' },
+  { id: 'max_hp_up',    cat: 'passive', name: 'Max HP +1',         price: 150, icon: '💚', desc: '+1 PV maximum' },
+  { id: 'extra_life',   cat: 'passive', name: 'Vie +1',            price: 200, icon: '❤️', desc: '+1 vie supplémentaire' },
+  { id: 'speed_up',     cat: 'passive', name: 'Vitesse +',         price: 60,  icon: '💨', desc: '+15% vitesse' },
+  { id: 'fire_rate_up', cat: 'passive', name: 'Cadence +',         price: 80,  icon: '🔥', desc: '+20% cadence de tir' },
+  { id: 'magnet_range', cat: 'passive', name: 'Magnet +',          price: 70,  icon: '🧲', desc: '+30% portée aimant' },
+  { id: 'drone_wave',   cat: 'active',  name: 'Drone (vague)',     price: 120, icon: '🤖', desc: 'Drone auto toute la vague' },
+  { id: 'shield_regen', cat: 'active',  name: 'Soin complet',      price: 60,  icon: '💊', desc: 'Restaure tous les PV' },
+  { id: 'nuke_start',   cat: 'active',  name: 'Nuke au départ',    price: 180, icon: '💥', desc: 'Nuke au début de la vague' },
+  { id: 'double_dmg',   cat: 'buff',    name: 'Double dégâts',     price: 100, icon: '⚔️', desc: 'x2 dégâts prochaine vague' },
+  { id: 'auto_heal',    cat: 'buff',    name: 'Auto-soin',         price: 80,  icon: '🩹', desc: '+1 PV toutes les 10s' },
+];
 
 const PLAYER_COLORS = ['#00ffff', '#ff00ff', '#ffff00', '#ff6600'];
 const DT = TICK_MS / 1000;
@@ -137,7 +167,14 @@ function createRoomState() {
     nextPickupId: 0,
     nextProjId: 0,
     nextEnemyId: 0,
-    settings: { duration: 300, difficulty: 'normal' },
+    settings: { difficulty: 'normal' },
+    wave: 1,
+    wavePhase: 'fighting',  // 'fighting' | 'intermission' | 'shop' | 'boss'
+    waveTimer: 0,
+    shopItems: new Map(),
+    playersReady: new Set(),
+    shopTimeout: 0,
+    stormDir: 0,
   };
 }
 
@@ -224,6 +261,17 @@ function createPlayer(id, name, index) {
     comboTimer: 0,       // ticks restants pour enchaîner un combo
     comboCount: 0,       // nombre de hits dans le combo actuel
     lastInputSeq: 0,     // dernier seq d'input traité (pour reconciliation)
+    crystals: 0,          // monnaie shop (séparée du score)
+    maxHp: 4,
+    speedMult: 1,
+    fireRateMult: 1,
+    magnetRangeMult: 1,
+    shopDrone: false,
+    shopNuke: false,
+    doubleDmgWave: false,
+    autoHealWave: false,
+    autoHealTimer: 0,
+    rerollCount: 0,
   };
 }
 
@@ -234,7 +282,7 @@ function killPlayer(p) {
   p.lives--;
   if (p.lives > 0) {
     p.respawnTimer = RESPAWN_TICKS;
-    p.hp = 4; // reset HP pour le prochain respawn
+    p.hp = p.maxHp; // reset HP pour le prochain respawn
   }
   // Si lives <= 0 : mort définitive, pas de respawnTimer
 }
@@ -351,8 +399,8 @@ function integratePlayer(p) {
 
   if (p.thrust) {
     const mult = p.effects.boost > 0 ? 2.2 : 1.0;
-    p.vx += Math.cos(p.angle) * THRUST_FORCE * mult * DT;
-    p.vy += Math.sin(p.angle) * THRUST_FORCE * mult * DT;
+    p.vx += Math.cos(p.angle) * THRUST_FORCE * p.speedMult * mult * DT;
+    p.vy += Math.sin(p.angle) * THRUST_FORCE * p.speedMult * mult * DT;
   }
 
   p.vx *= DRAG;
@@ -410,10 +458,16 @@ function createProjectile(owner, weaponType) {
 
 // Détruire ou déflèchir un astéroïde touché (knockback directionnel amélioré)
 function hitAsteroid(a, p, events, forceDestroy = false, impactVx, impactVy) {
-  if (forceDestroy || --a.hp <= 0) {
+  // Apply double damage from shop buff
+  const dmg = (p && p.doubleDmgWave) ? 2 : 1;
+  if (!forceDestroy) a.hp -= dmg; else a.hp = 0;
+  if (forceDestroy || a.hp <= 0) {
     const creditId = a.deflectedBy ?? (p ? p.id : null);
     const scorer = creditId ? (gameState.players.get(creditId) ?? p) : p;
-    if (scorer) scorer.score += a.crystalValue;
+    if (scorer) {
+      scorer.score += a.crystalValue;
+      scorer.crystals += Math.floor(a.crystalValue / 5);
+    }
     events.push({
       type: 'asteroid_destroyed',
       id: a.id, x: a.x, y: a.y, radius: a.radius,
@@ -488,8 +542,8 @@ function processShots(events) {
     if (p.selectedWeapon === 'laser' && p.effects.laser > 0) weaponType = 'laser';
     else if (p.selectedWeapon === 'missile' && p.effects.missile > 0) weaponType = 'missile';
 
-    const cooldown = p.effects.rapid > 0 ? Math.ceil(SHOOT_COOLDOWN / 2) : SHOOT_COOLDOWN;
-    p.shootCooldown = cooldown;
+    const baseCooldown = p.effects.rapid > 0 ? Math.ceil(SHOOT_COOLDOWN / 2) : SHOOT_COOLDOWN;
+    p.shootCooldown = Math.ceil(baseCooldown / p.fireRateMult);
 
     if (weaponType === 'bullet' || weaponType === 'missile') {
       if (weaponType === 'missile') p.effects.missile--;
@@ -576,23 +630,25 @@ function integrateProjectiles(events) {
           const kb = KNOCKBACK_MISSILE * (1 - d / MISSILE_AOE) / (a.radius * 0.05);
           hitAsteroid(a, owner, events, true, dx / d * kb, dy / d * kb);
         }
-        // Missile AOE : aussi blesser les joueurs (sauf tireur)
-        for (const target of gameState.players.values()) {
-          if (target.id === proj.ownerId || !target.alive || target.respawnTimer > 0) continue;
-          if (target.effects.intangible > 0) continue;
-          if (dist2(hx, hy, target.x, target.y) < MISSILE_AOE ** 2) {
-            target.hp--;
-            const dxp = target.x - hx, dyp = target.y - hy;
-            const dp = Math.sqrt(dxp * dxp + dyp * dyp) || 1;
-            target.vx += (dxp / dp) * 120;
-            target.vy += (dyp / dp) * 120;
-            owner.score += 40;
-            if (target.hp <= 0) {
-              killPlayer(target);
-              owner.score += 75;
-              events.push({ type: 'player_killed', victimId: target.id, killerId: proj.ownerId, x: target.x, y: target.y, pts: 115, livesLeft: target.lives });
-            } else {
-              events.push({ type: 'player_hit', victimId: target.id, byId: proj.ownerId, x: target.x, y: target.y, pts: 40 });
+        // Missile AOE : aussi blesser les joueurs (sauf tireur, pas en easy)
+        if (gameState.settings.difficulty !== 'easy') {
+          for (const target of gameState.players.values()) {
+            if (target.id === proj.ownerId || !target.alive || target.respawnTimer > 0) continue;
+            if (target.effects.intangible > 0) continue;
+            if (dist2(hx, hy, target.x, target.y) < MISSILE_AOE ** 2) {
+              target.hp--;
+              const dxp = target.x - hx, dyp = target.y - hy;
+              const dp = Math.sqrt(dxp * dxp + dyp * dyp) || 1;
+              target.vx += (dxp / dp) * 120;
+              target.vy += (dyp / dp) * 120;
+              owner.score += 40;
+              if (target.hp <= 0) {
+                killPlayer(target);
+                owner.score += 75;
+                events.push({ type: 'player_killed', victimId: target.id, killerId: proj.ownerId, x: target.x, y: target.y, pts: 115, livesLeft: target.lives });
+              } else {
+                events.push({ type: 'player_hit', victimId: target.id, byId: proj.ownerId, x: target.x, y: target.y, pts: 40 });
+              }
             }
           }
         }
@@ -602,36 +658,38 @@ function integrateProjectiles(events) {
       }
     }
 
-    // Collision avec les autres joueurs (PvP) — seulement les projectiles de joueurs
-    if (!deleted && gameState.projectiles.has(proj.id) && !proj.isEnemy) {
-      for (const target of gameState.players.values()) {
-        if (target.id === proj.ownerId || !target.alive || target.respawnTimer > 0) continue;
-        if (target.effects.intangible > 0) continue;
-        const r = proj.radius + PLAYER_RADIUS;
-        if (dist2(proj.x, proj.y, target.x, target.y) < r * r) {
-          target.hp--;
-          const impLen = Math.sqrt(proj.vx ** 2 + proj.vy ** 2) || 1;
-          target.vx += (proj.vx / impLen) * 60;
-          target.vy += (proj.vy / impLen) * 60;
-          // Combo system : hits rapprochés = multiplicateur
-          owner.comboCount++;
-          owner.comboTimer = COMBO_WINDOW;
-          const combo = Math.min(owner.comboCount, 5);
-          const baseHitPts = proj.type === 'missile' ? 40 : proj.type === 'laser' ? 30 : 25;
-          const hitPts = Math.floor(baseHitPts * (1 + (combo - 1) * 0.25));
-          owner.score += hitPts;
-          if (target.hp <= 0) {
-            killPlayer(target);
-            target.killStreak = 0;
-            owner.killStreak++;
-            const killBonus = 75 + (owner.killStreak >= 5 ? 50 : owner.killStreak >= 3 ? 25 : 0);
-            owner.score += killBonus;
-            events.push({ type: 'player_killed', victimId: target.id, killerId: proj.ownerId, x: target.x, y: target.y, pts: hitPts + killBonus, streak: owner.killStreak, combo, livesLeft: target.lives });
-          } else {
-            events.push({ type: 'player_hit', victimId: target.id, byId: proj.ownerId, x: target.x, y: target.y, pts: hitPts, combo });
+    // Collision avec les autres joueurs (PvP) — seulement les projectiles de joueurs (pas en easy)
+    if (gameState.settings.difficulty !== 'easy') {
+      if (!deleted && gameState.projectiles.has(proj.id) && !proj.isEnemy) {
+        for (const target of gameState.players.values()) {
+          if (target.id === proj.ownerId || !target.alive || target.respawnTimer > 0) continue;
+          if (target.effects.intangible > 0) continue;
+          const r = proj.radius + PLAYER_RADIUS;
+          if (dist2(proj.x, proj.y, target.x, target.y) < r * r) {
+            target.hp--;
+            const impLen = Math.sqrt(proj.vx ** 2 + proj.vy ** 2) || 1;
+            target.vx += (proj.vx / impLen) * 60;
+            target.vy += (proj.vy / impLen) * 60;
+            // Combo system : hits rapprochés = multiplicateur
+            owner.comboCount++;
+            owner.comboTimer = COMBO_WINDOW;
+            const combo = Math.min(owner.comboCount, 5);
+            const baseHitPts = proj.type === 'missile' ? 40 : proj.type === 'laser' ? 30 : 25;
+            const hitPts = Math.floor(baseHitPts * (1 + (combo - 1) * 0.25));
+            owner.score += hitPts;
+            if (target.hp <= 0) {
+              killPlayer(target);
+              target.killStreak = 0;
+              owner.killStreak++;
+              const killBonus = 75 + (owner.killStreak >= 5 ? 50 : owner.killStreak >= 3 ? 25 : 0);
+              owner.score += killBonus;
+              events.push({ type: 'player_killed', victimId: target.id, killerId: proj.ownerId, x: target.x, y: target.y, pts: hitPts + killBonus, streak: owner.killStreak, combo, livesLeft: target.lives });
+            } else {
+              events.push({ type: 'player_hit', victimId: target.id, byId: proj.ownerId, x: target.x, y: target.y, pts: hitPts, combo });
+            }
+            gameState.projectiles.delete(proj.id);
+            break;
           }
-          gameState.projectiles.delete(proj.id);
-          break;
         }
       }
     }
@@ -642,11 +700,15 @@ function integrateProjectiles(events) {
         if (!e.alive) continue;
         const r = proj.radius + e.radius;
         if (dist2(proj.x, proj.y, e.x, e.y) < r * r) {
-          e.hp--;
+          const eDmg = (owner && owner.doubleDmgWave) ? 2 : 1;
+          e.hp -= eDmg;
           if (e.hp <= 0) {
             e.alive = false;
             e.respawnTimer = ENEMY_RESPAWN_TICKS;
-            if (owner) owner.score += ENEMY_KILL_SCORE;
+            if (owner) {
+              owner.score += ENEMY_KILL_SCORE;
+              owner.crystals += 25;
+            }
             // Drop un pickup rare garanti
             const rarity = Math.random() < 0.3 ? 'epic' : 'rare';
             const item = weightedRandom(LOOT_TABLE[rarity]);
@@ -665,7 +727,8 @@ function integrateProjectiles(events) {
       const b = gameState.boss;
       const r = proj.radius + b.radius;
       if (dist2(proj.x, proj.y, b.x, b.y) < r * r) {
-        const dmg = proj.type === 'missile' ? 3 : 1;
+        let dmg = proj.type === 'missile' ? 3 : 1;
+        if (owner && owner.doubleDmgWave) dmg *= 2;
         b.hp -= dmg;
         if (owner) owner.score += dmg * 5;
         if (b.hp <= 0) {
@@ -780,18 +843,19 @@ function checkPlayerPickupCollisions(events) {
       if (dist2(p.x, p.y, pickup.x, pickup.y) < (22 * 22)) {
         if (pickup.type === 'crystal') {
           p.score += 30;
+          p.crystals += 30;
         } else if (pickup.type === 'shield') {
-          p.hp = Math.min(p.hp + 1, 4);
+          p.hp = Math.min(p.hp + 1, p.maxHp);
         } else if (pickup.type === 'boost') {
           p.effects.boost = EFFECT_TICKS_BOOST;
         } else if (pickup.type === 'rapid') {
           p.effects.rapid = EFFECT_TICKS_RAPID;
         } else if (pickup.type === 'laser') {
-          p.effects.laser += LASER_AMMO;
+          p.effects.laser += DROP_AMMO.laser;
         } else if (pickup.type === 'missile') {
-          p.effects.missile += MISSILE_AMMO;
+          p.effects.missile += DROP_AMMO.missile;
         } else if (pickup.type === 'trishot') {
-          p.effects.trishot += TRISHOT_AMMO;
+          p.effects.trishot += DROP_AMMO.trishot;
         } else if (pickup.type === 'drone') {
           p.effects.drone = EFFECT_TICKS_DRONE;
           p.droneShootCd = 0;
@@ -800,7 +864,7 @@ function checkPlayerPickupCollisions(events) {
         } else if (pickup.type === 'intangible') {
           p.effects.intangible = EFFECT_TICKS_INTANGIBLE;
         } else if (pickup.type === 'minigun') {
-          p.effects.minigun += MINIGUN_AMMO;
+          p.effects.minigun += DROP_AMMO.minigun;
         } else if (pickup.type === 'gravwell') {
           p.effects.gravwell = EFFECT_TICKS_GRAVWELL;
           p.gravwellX = p.x + Math.cos(p.angle) * 100;
@@ -831,9 +895,8 @@ function checkPlayerPickupCollisions(events) {
 }
 
 function getDynamicMax() {
-  if (!gameState.startTime) return 3;
-  const elapsed = (Date.now() - gameState.startTime) / 1000;
-  return Math.min(MAX_ASTEROIDS, Math.floor(5 + elapsed / 5));
+  const diffBonus = { easy: 0, normal: 2, hardcore: 5 }[gameState.settings.difficulty] || 0;
+  return Math.min(27, 5 + gameState.wave * 2 + diffBonus);
 }
 
 function maintainAsteroids() {
@@ -876,8 +939,9 @@ function integrateDrones(events) {
 function applyMagnet() {
   for (const p of gameState.players.values()) {
     if (!p.alive || p.respawnTimer > 0 || p.effects.magnet <= 0) continue;
+    const mRadius = MAGNET_RADIUS * p.magnetRangeMult;
     for (const pk of gameState.pickups.values()) {
-      if (dist2(p.x, p.y, pk.x, pk.y) < MAGNET_RADIUS * MAGNET_RADIUS) {
+      if (dist2(p.x, p.y, pk.x, pk.y) < mRadius * mRadius) {
         pk.x += (p.x - pk.x) * 0.08;
         pk.y += (p.y - pk.y) * 0.08;
       }
@@ -1193,10 +1257,135 @@ function integrateBoss(events) {
   }
 }
 
+// ─── Shop & Wave System ──────────────────────────────────────────────────────
+
+const DIFFICULTY_PRICE_MULT = { easy: 0.8, normal: 1, hardcore: 1.3 };
+
+function generateShopItems(difficulty) {
+  const items = [];
+  const pool = [...SHOP_POOL];
+  const mult = DIFFICULTY_PRICE_MULT[difficulty] || 1;
+  const count = Math.min(5, pool.length);
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    const item = pool.splice(idx, 1)[0];
+    items.push({ slotId: i, ...item, price: Math.round(item.price * mult), bought: false });
+  }
+  return items;
+}
+
+function openShop(room) {
+  gameState.wavePhase = 'shop';
+  gameState.shopTimeout = SHOP_TIMEOUT_TICKS;
+  gameState.playersReady = new Set();
+  gameState.shopItems = new Map();
+  const diff = gameState.settings.difficulty;
+  for (const p of gameState.players.values()) {
+    p.rerollCount = 0; // reset reroll count each shop
+    const items = generateShopItems(diff);
+    gameState.shopItems.set(p.id, items);
+  }
+  // Send per-player shop state
+  for (const ws of room.wsSet) {
+    if (ws.readyState !== 1) continue;
+    const p = gameState.players.get(ws.playerId);
+    if (!p) continue;
+    const items = gameState.shopItems.get(p.id) || [];
+    const rerollCost = REROLL_BASE_COST * (p.rerollCount + 1);
+    ws.send(JSON.stringify({ type: 'shop_open', items, balance: p.crystals, wave: gameState.wave, rerollCost }));
+  }
+}
+
+function applyShopItem(player, itemId) {
+  const item = SHOP_POOL.find(i => i.id === itemId);
+  if (!item) return;
+  switch (itemId) {
+    case 'laser_ammo':   player.effects.laser += 8; break;
+    case 'missile_ammo': player.effects.missile += 3; break;
+    case 'trishot_ammo': player.effects.trishot += 30; break;
+    case 'minigun_ammo': player.effects.minigun += 80; break;
+    case 'max_hp_up':    player.maxHp++; player.hp = Math.min(player.hp + 1, player.maxHp); break;
+    case 'extra_life':   player.lives++; break;
+    case 'speed_up':     player.speedMult += 0.15; break;
+    case 'fire_rate_up': player.fireRateMult += 0.2; break;
+    case 'magnet_range': player.magnetRangeMult += 0.3; break;
+    case 'drone_wave':   player.shopDrone = true; break;
+    case 'shield_regen': player.hp = player.maxHp; break;
+    case 'nuke_start':   player.shopNuke = true; break;
+    case 'double_dmg':   player.doubleDmgWave = true; break;
+    case 'auto_heal':    player.autoHealWave = true; break;
+  }
+}
+
+function startNextWave(room) {
+  gameState.wave++;
+  const cfg = WAVE_CONFIG[gameState.settings.difficulty] || WAVE_CONFIG.normal;
+
+  // Check if this is the boss wave
+  if (gameState.wave >= cfg.bossWave) {
+    gameState.wavePhase = 'boss';
+    // Clear asteroids for boss fight
+    gameState.asteroids.clear();
+    gameState.pickups.clear();
+    gameState.projectiles.clear();
+    gameState.enemies.clear();
+    spawnBoss();
+    broadcastRoom(room, { type: 'wave_start', wave: gameState.wave, isBoss: true });
+    return;
+  }
+
+  // Normal wave
+  gameState.wavePhase = 'fighting';
+  gameState.waveTimer = cfg.waveSec * 20; // convert seconds to ticks
+  gameState.asteroids.clear();
+  gameState.pickups.clear();
+  gameState.projectiles.clear();
+  gameState.enemies.clear();
+
+  // Spawn initial asteroids (scales with wave)
+  const initAst = Math.min(5 + gameState.wave, 12);
+  for (let i = 0; i < initAst; i++) {
+    const a = spawnAsteroid();
+    gameState.asteroids.set(a.id, a);
+  }
+
+  // Spawn enemies based on wave + difficulty
+  if (gameState.wave >= cfg.enemyStartWave) {
+    const count = 1 + Math.floor((gameState.wave - cfg.enemyStartWave) / 2);
+    for (let i = 0; i < Math.min(count, 6); i++) spawnEnemy();
+  }
+
+  // Apply wave-start shop buffs
+  for (const p of gameState.players.values()) {
+    if (!p.alive && p.lives <= 0) continue; // permanently dead
+    // Respawn dead players for new wave
+    if (!p.alive && p.lives > 0) {
+      p.alive = true;
+      p.hp = p.maxHp;
+      p.respawnTimer = 0;
+      const angle = Math.random() * Math.PI * 2;
+      p.x = Math.cos(angle) * 150;
+      p.y = Math.sin(angle) * 150;
+      p.vx = 0; p.vy = 0;
+    }
+    // Apply shop drone
+    if (p.shopDrone) {
+      p.effects.drone = cfg.waveSec * 20 + 100; // full wave + buffer
+      p.shopDrone = false;
+    }
+    // Apply shop nuke (delayed by a few ticks so players see it)
+    if (p.shopNuke) {
+      p.shopNuke = 'pending';
+    }
+    // Reset auto-heal timer
+    p.autoHealTimer = 0;
+  }
+
+  broadcastRoom(room, { type: 'wave_start', wave: gameState.wave, isBoss: false });
+}
+
 function checkWinCondition() {
-  const elapsed = (Date.now() - gameState.startTime) / 1000;
-  const duration = gameState.settings?.duration || GAME_DURATION;
-  // Tous les joueurs morts (pas en respawn) → fin immédiate (priorité max)
+  // All dead = game over (priority)
   if (gameState.players.size > 0) {
     let allDead = true;
     for (const p of gameState.players.values()) {
@@ -1204,15 +1393,8 @@ function checkWinCondition() {
     }
     if (allDead) return 'alldead';
   }
-  // Timer écoulé → spawn boss si pas encore fait
-  if (elapsed >= duration && !gameState.boss) {
-    spawnBoss();
-    return false; // on ne finit pas, le boss doit être tué
-  }
-  // Boss tué → fin
+  // Boss killed = victory
   if (gameState.boss && !gameState.boss.alive) return 'bosskilled';
-  // Boss en vie → la partie continue
-  if (gameState.boss && gameState.boss.alive) return false;
   return false;
 }
 
@@ -1220,17 +1402,18 @@ function checkWinCondition() {
 
 function gameTick(room) {
   if (gameState.phase !== 'playing') return;
-
   const events = [];
+  const wp = gameState.wavePhase;
 
-  for (const p of gameState.players.values()) integratePlayer(p);
+  if (wp === 'fighting' || wp === 'boss') {
+    // === EXISTING GAME LOGIC ===
+    for (const p of gameState.players.values()) integratePlayer(p);
 
-  // Bordures électriques : dégât aux joueurs qui touchent
-  for (const p of gameState.players.values()) {
-    if (!p.borderKill) continue;
-    p.borderKill = false;
-    if (!p.alive || p.respawnTimer > 0 || p.effects.intangible > 0) continue;
-    {
+    // Border damage
+    for (const p of gameState.players.values()) {
+      if (!p.borderKill) continue;
+      p.borderKill = false;
+      if (!p.alive || p.respawnTimer > 0 || p.effects.intangible > 0) continue;
       p.hp--;
       events.push({ type: 'player_hit', x: p.x, y: p.y, victimId: p.id, byId: null });
       events.push({ type: 'border_zap', x: p.x, y: p.y });
@@ -1238,107 +1421,163 @@ function gameTick(room) {
         killPlayer(p);
         events.push({ type: 'player_killed', x: p.x, y: p.y, victimId: p.id, livesLeft: p.lives });
       } else {
-        p.effects.intangible = 30; // i-frames après hit
+        p.effects.intangible = 30;
       }
     }
-  }
 
-  // Combo timer decay
-  for (const p of gameState.players.values()) {
-    if (p.comboTimer > 0) { p.comboTimer--; if (p.comboTimer <= 0) p.comboCount = 0; }
-  }
-
-  // Pickup lifetime — despawn vieux pickups
-  for (const [id, pk] of gameState.pickups) {
-    if (pk.age !== undefined) pk.age++;
-    else pk.age = 0;
-    if (pk.age > PICKUP_LIFETIME) {
-      gameState.pickups.delete(id);
-      events.push({ type: 'pickup_despawn', id });
+    for (const p of gameState.players.values()) {
+      if (p.comboTimer > 0) { p.comboTimer--; if (p.comboTimer <= 0) p.comboCount = 0; }
     }
-  }
 
-  processShots(events);
-  integrateProjectiles(events);
-  integrateDrones(events);
-  integrateMinigun(events);
-  applyGravwell(events);
-  for (const a of gameState.asteroids.values()) integrateAsteroid(a);
-  // Supprimer les astéroïdes de tempête qui ont traversé
-  for (const [id, a] of gameState.asteroids) {
-    if (a.expired) gameState.asteroids.delete(id);
-  }
-  checkAsteroidCollisions();
-  checkAsteroidPlayerCollisions(events);
-  applyMagnet();
-  checkPlayerPickupCollisions(events);
-  maintainAsteroids();
-
-  // Ennemis IA
-  for (const e of gameState.enemies.values()) integrateEnemy(e, events);
-  checkEnemyPlayerCollisions(events);
-
-  // Spawn ennemis supplémentaires en difficulté
-  if (gameState.settings.difficulty === 'normal' && gameState.tick === 1200 && gameState.enemies.size < 2) spawnEnemy();
-  if (gameState.settings.difficulty === 'hardcore' && gameState.tick === 600 && gameState.enemies.size < 4) { spawnEnemy(); spawnEnemy(); }
-
-  // Boss
-  integrateBoss(events);
-
-  // Asteroid Storm : toutes les 30s, une vague dense d'un côté (pas pendant boss)
-  // Warning 3s avant (tick % 600 === 540)
-  if (gameState.tick > 0 && gameState.tick % 600 === 540 && !gameState.boss) {
-    // Choisir direction : 0=droite, 1=gauche, 2=bas, 3=haut
-    gameState.stormDir = Math.floor(Math.random() * 4);
-    events.push({ type: 'asteroid_storm_warning', dir: gameState.stormDir });
-  }
-  // Spawn effectif 3s après le warning
-  if (gameState.tick > 0 && gameState.tick % 600 === 0 && !gameState.boss) {
-    const dir = gameState.stormDir ?? 0;
-    // Intensité augmente avec le temps et la difficulté
-    const elapsed = gameState.startTime ? (Date.now() - gameState.startTime) / 1000 : 0;
-    const timeFactor = Math.floor(elapsed / 60); // +1 par minute écoulée
-    const diffBonus = gameState.settings.difficulty === 'hardcore' ? 4 : gameState.settings.difficulty === 'normal' ? 2 : 0;
-    const stormCount = 6 + diffBonus + timeFactor * 2 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < stormCount; i++) {
-      const sizes = [
-        { radius: 32, hp: 3, crystal: 50, weight: 2 },
-        { radius: 20, hp: 2, crystal: 25, weight: 4 },
-        { radius: 10, hp: 1, crystal: 10, weight: 3 },
-      ];
-      const total = sizes.reduce((s, x) => s + x.weight, 0);
-      let r = Math.random() * total, chosen = sizes[0];
-      for (const s of sizes) { r -= s.weight; if (r <= 0) { chosen = s; break; } }
-
-      // Spawn sur le bord source, dispersé le long du bord
-      let x, y;
-      const spread = (Math.random() - 0.5) * WORLD * 0.8;
-      const speed = 60 + Math.random() * 80;
-      let vx, vy;
-      // dir: 0=vient de gauche→droite, 1=droite→gauche, 2=haut→bas, 3=bas→haut
-      const drift = (Math.random() - 0.5) * 40; // légère déviation
-      if (dir === 0) { x = -HALF - 20; y = spread; vx = speed; vy = drift; }
-      else if (dir === 1) { x = HALF + 20; y = spread; vx = -speed; vy = drift; }
-      else if (dir === 2) { x = spread; y = -HALF - 20; vx = drift; vy = speed; }
-      else { x = spread; y = HALF + 20; vx = drift; vy = -speed; }
-
-      const id = 'a' + (gameState.nextAsteroidId++);
-      const a = {
-        id, x, y, vx, vy,
-        angle: Math.random() * Math.PI * 2,
-        angularVel: (Math.random() - 0.5) * 3,
-        radius: chosen.radius, hp: chosen.hp, maxHp: chosen.hp,
-        crystalValue: chosen.crystal, loot: null,
-        storm: true, // marqué comme astéroïde de tempête
-      };
-      gameState.asteroids.set(a.id, a);
+    for (const [id, pk] of gameState.pickups) {
+      if (pk.age !== undefined) pk.age++;
+      else pk.age = 0;
+      if (pk.age > PICKUP_LIFETIME) {
+        gameState.pickups.delete(id);
+        events.push({ type: 'pickup_despawn', id });
+      }
     }
-    events.push({ type: 'asteroid_storm', dir });
+
+    processShots(events);
+    integrateProjectiles(events);
+    integrateDrones(events);
+    integrateMinigun(events);
+    applyGravwell(events);
+    for (const a of gameState.asteroids.values()) integrateAsteroid(a);
+    for (const [id, a] of gameState.asteroids) {
+      if (a.expired) gameState.asteroids.delete(id);
+    }
+    checkAsteroidCollisions();
+    checkAsteroidPlayerCollisions(events);
+    applyMagnet();
+    checkPlayerPickupCollisions(events);
+
+    if (wp === 'fighting') {
+      maintainAsteroids();
+
+      // Enemies
+      for (const e of gameState.enemies.values()) integrateEnemy(e, events);
+      checkEnemyPlayerCollisions(events);
+
+      // Nuke from shop (first tick of wave)
+      for (const p of gameState.players.values()) {
+        if (p.shopNuke === 'pending') {
+          p.shopNuke = false;
+          // Destroy all asteroids
+          for (const a of gameState.asteroids.values()) {
+            events.push({ type: 'asteroid_destroyed', x: a.x, y: a.y, radius: a.radius, playerId: p.id, crystals: a.crystalValue });
+            p.score += a.crystalValue;
+            p.crystals += Math.floor(a.crystalValue / 5);
+          }
+          gameState.asteroids.clear();
+          events.push({ type: 'nuke_activated', x: 0, y: 0, playerId: p.id });
+        }
+      }
+
+      // Auto-heal
+      for (const p of gameState.players.values()) {
+        if (p.autoHealWave && p.alive && p.hp < p.maxHp) {
+          p.autoHealTimer++;
+          if (p.autoHealTimer >= 200) {
+            p.hp = Math.min(p.hp + 1, p.maxHp);
+            p.autoHealTimer = 0;
+          }
+        }
+      }
+
+      // Storm system (wave-scaled)
+      const cfg = WAVE_CONFIG[gameState.settings.difficulty] || WAVE_CONFIG.normal;
+      const stormInterval = Math.max(300, 600 - gameState.wave * 30);
+      if (gameState.wave >= cfg.stormStartWave && gameState.tick > 0) {
+        if (gameState.tick % stormInterval === stormInterval - 60) {
+          gameState.stormDir = Math.floor(Math.random() * 4);
+          events.push({ type: 'asteroid_storm_warning', dir: gameState.stormDir });
+        }
+        if (gameState.tick % stormInterval === 0) {
+          const dir = gameState.stormDir ?? 0;
+          const diffBonus = gameState.settings.difficulty === 'hardcore' ? 4 : gameState.settings.difficulty === 'normal' ? 2 : 0;
+          const stormCount = 6 + diffBonus + gameState.wave + Math.floor(Math.random() * 3);
+          for (let i = 0; i < stormCount; i++) {
+            const sizes = [
+              { radius: 32, hp: 3, crystal: 50, weight: 2 },
+              { radius: 20, hp: 2, crystal: 25, weight: 4 },
+              { radius: 10, hp: 1, crystal: 10, weight: 3 },
+            ];
+            const total = sizes.reduce((s, x) => s + x.weight, 0);
+            let r = Math.random() * total, chosen = sizes[0];
+            for (const s of sizes) { r -= s.weight; if (r <= 0) { chosen = s; break; } }
+            let x, y, vx, vy;
+            const spread = (Math.random() - 0.5) * WORLD * 0.8;
+            const speed = 60 + Math.random() * 80;
+            const drift = (Math.random() - 0.5) * 40;
+            if (dir === 0) { x = -HALF - 20; y = spread; vx = speed; vy = drift; }
+            else if (dir === 1) { x = HALF + 20; y = spread; vx = -speed; vy = drift; }
+            else if (dir === 2) { x = spread; y = -HALF - 20; vx = drift; vy = speed; }
+            else { x = spread; y = HALF + 20; vx = drift; vy = -speed; }
+            const id = 'a' + (gameState.nextAsteroidId++);
+            gameState.asteroids.set(id, {
+              id, x, y, vx, vy,
+              angle: Math.random() * Math.PI * 2,
+              angularVel: (Math.random() - 0.5) * 3,
+              radius: chosen.radius, hp: chosen.hp, maxHp: chosen.hp,
+              crystalValue: chosen.crystal, loot: null, storm: true,
+            });
+          }
+          events.push({ type: 'asteroid_storm', dir });
+        }
+      }
+
+      // Wave timer
+      gameState.waveTimer--;
+      if (gameState.waveTimer <= 0) {
+        // Wave complete -> intermission
+        gameState.wavePhase = 'intermission';
+        gameState.waveTimer = INTERMISSION_TICKS;
+        events.push({ type: 'wave_complete', wave: gameState.wave });
+      }
+    }
+
+    if (wp === 'boss') {
+      for (const e of gameState.enemies.values()) integrateEnemy(e, events);
+      checkEnemyPlayerCollisions(events);
+      integrateBoss(events);
+    }
+
+  } else if (wp === 'intermission') {
+    // Keep basic physics running so entities don't freeze/jitter
+    for (const p of gameState.players.values()) integratePlayer(p);
+    for (const a of gameState.asteroids.values()) integrateAsteroid(a);
+    // Keep pickups bobbing
+    for (const pk of gameState.pickups.values()) pk.age++;
+
+    gameState.waveTimer--;
+    if (gameState.waveTimer <= 0) {
+      const cfg = WAVE_CONFIG[gameState.settings.difficulty] || WAVE_CONFIG.normal;
+      if (gameState.wave + 1 >= cfg.bossWave) {
+        startNextWave(room);
+      } else {
+        openShop(room);
+      }
+    }
+
+  } else if (wp === 'shop') {
+    gameState.shopTimeout--;
+    // Check if all alive players are ready OR timeout
+    let allReady = true;
+    for (const p of gameState.players.values()) {
+      if ((p.alive || p.lives > 0) && !gameState.playersReady.has(p.id)) {
+        allReady = false;
+        break;
+      }
+    }
+    if (allReady || gameState.shopTimeout <= 0) {
+      startNextWave(room);
+    }
   }
 
   gameState.tick++;
 
-  // Envoyer snapshot + events — personnalisé par joueur (lastInputSeq pour reconciliation)
+  // Build & broadcast snapshot
   const snap = { type: 'snapshot', ...buildSnapshot(), events };
   for (const ws of room.wsSet) {
     if (ws.readyState !== 1) continue;
@@ -1348,6 +1587,7 @@ function gameTick(room) {
     ws.send(JSON.stringify(snap));
   }
 
+  // Win condition
   const winResult = checkWinCondition();
   if (winResult) endGame(room, winResult);
 }
@@ -1356,11 +1596,15 @@ function buildSnapshot() {
   return {
     tick: gameState.tick,
     phase: gameState.phase,
-    elapsed: gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0,
+    wave: gameState.wave,
+    wavePhase: gameState.wavePhase,
+    waveTimeLeft: Math.ceil(Math.max(0, gameState.waveTimer) / 20),
+    bossWave: (WAVE_CONFIG[gameState.settings.difficulty] || WAVE_CONFIG.normal).bossWave,
     players: [...gameState.players.values()].map(p => ({
       id: p.id, name: p.name, color: p.color,
       x: p.x, y: p.y, angle: p.angle, vx: p.vx, vy: p.vy,
       hp: p.hp, lives: p.lives, score: p.score, alive: p.alive,
+      crystals: p.crystals,
       respawnTimer: p.respawnTimer, thrust: p.thrust,
       boosted: p.effects.boost > 0,
       boostTicks: p.effects.boost,
@@ -1402,25 +1646,28 @@ function buildSnapshot() {
       hp: gameState.boss.hp, maxHp: gameState.boss.maxHp, alive: gameState.boss.alive,
       phase: gameState.boss.phase,
     } : null,
-    duration: gameState.settings?.duration || GAME_DURATION,
   };
 }
 
 function startGame(room, settings) {
-  // Appliquer les settings du host
   if (settings) {
-    if ([180, 300, 600].includes(settings.duration)) gameState.settings.duration = settings.duration;
     if (['easy', 'normal', 'hardcore'].includes(settings.difficulty)) gameState.settings.difficulty = settings.difficulty;
   }
-  console.log(`🚀 [${room.code}] Partie en cours ! (${gameState.settings.duration / 60} min, ${gameState.settings.difficulty})`);
+  const cfg = WAVE_CONFIG[gameState.settings.difficulty] || WAVE_CONFIG.normal;
+  console.log(`🚀 [${room.code}] Partie en cours ! (${gameState.settings.difficulty}, boss wave ${cfg.bossWave})`);
   gameState.phase = 'playing';
   gameState.startTime = Date.now();
+  gameState.wave = 1;
+  gameState.wavePhase = 'fighting';
+  gameState.waveTimer = cfg.waveSec * 20;
   gameState.asteroids.clear();
   gameState.pickups.clear();
   gameState.projectiles.clear();
   gameState.enemies.clear();
   gameState.boss = null;
   gameState.tick = 0;
+  gameState.shopItems = new Map();
+  gameState.playersReady = new Set();
 
   let idx = 0;
   for (const p of gameState.players.values()) {
@@ -1433,13 +1680,12 @@ function startGame(room, settings) {
     gameState.asteroids.set(a.id, a);
   }
 
-  // Spawn ennemis selon la difficulté
-  if (gameState.settings.difficulty !== 'easy') {
-    const count = gameState.settings.difficulty === 'hardcore' ? 2 : 1;
-    for (let i = 0; i < count; i++) spawnEnemy();
+  // Spawn enemies for wave 1 only if difficulty requires it
+  if (1 >= cfg.enemyStartWave) {
+    spawnEnemy();
   }
 
-  broadcastRoom(room, { type: 'start', duration: gameState.settings.duration, difficulty: gameState.settings.difficulty });
+  broadcastRoom(room, { type: 'start', difficulty: gameState.settings.difficulty, bossWave: cfg.bossWave, wave: 1 });
 }
 
 function endGame(room, reason) {
@@ -1449,9 +1695,9 @@ function endGame(room, reason) {
     .sort((a, b) => b.score - a.score);
   // Sauvegarder les highscores
   const diff = gameState.settings?.difficulty || 'normal';
-  const dur = gameState.settings?.duration || 300;
+  const cfg = WAVE_CONFIG[diff] || WAVE_CONFIG.normal;
   for (const s of scores) {
-    if (s.score > 0) addHighscore(s.name, s.score, diff, dur);
+    if (s.score > 0) addHighscore(s.name, s.score, diff, cfg.bossWave);
   }
   broadcastRoom(room, { type: 'gameover', scores, reason: reason || 'time' });
   console.log(`🏆 [${room.code}] Fin (${reason}) :`, scores.map(s => `${s.name}:${s.score}`).join(', '));
@@ -1466,11 +1712,19 @@ function resetLobby(room) {
   gameState.enemies.clear();
   gameState.boss = null;
   gameState.tick = 0;
+  gameState.wave = 1;
+  gameState.wavePhase = 'fighting';
+  gameState.waveTimer = 0;
+  gameState.shopItems = new Map();
+  gameState.playersReady = new Set();
   for (const p of gameState.players.values()) {
     p.hp = 4; p.lives = 2; p.score = 0; p.alive = true; p.respawnTimer = 0;
     p.effects = { boost: 0, rapid: 0, laser: 0, missile: 0, trishot: 0, drone: 0, magnet: 0, intangible: 0, minigun: 0, gravwell: 0 };
     p.droneAngle = 0; p.droneShootCd = 0; p.gravwellX = 0; p.gravwellY = 0;
     p.killStreak = 0; p.comboTimer = 0; p.comboCount = 0;
+    p.crystals = 0; p.maxHp = 4; p.speedMult = 1; p.fireRateMult = 1;
+    p.magnetRangeMult = 1; p.shopDrone = false; p.shopNuke = false;
+    p.doubleDmgWave = false; p.autoHealWave = false; p.autoHealTimer = 0;
   }
   broadcastLobbyUpdate(room);
 }
@@ -1570,7 +1824,7 @@ Bun.serve({
         if (!room) return;
         if (ws.playerId !== room.hostId) return;
         if (room.gameState.phase !== 'lobby') return;
-        withRoom(room, () => startGame(room, { duration: msg.duration, difficulty: msg.difficulty }));
+        withRoom(room, () => startGame(room, { difficulty: msg.difficulty }));
       }
 
       // ── Input en jeu ──────────────────────────────────────────────────────
@@ -1598,6 +1852,50 @@ Bun.serve({
       // ── Highscores ──────────────────────────────────────────────────────
       if (msg.type === 'get_highscores') {
         ws.send(JSON.stringify({ type: 'highscores', data: loadHighscores() }));
+      }
+
+      // ── Buy shop item ──────────────────────────────────────────────────
+      if (msg.type === 'buy_item') {
+        const room = ws.room;
+        if (!room) return;
+        if (room.gameState.wavePhase !== 'shop') return;
+        const p = room.gameState.players.get(ws.playerId);
+        if (!p) return;
+        const playerShop = room.gameState.shopItems.get(ws.playerId);
+        if (!playerShop) return;
+        const slot = playerShop.find(s => s.slotId === msg.slotId && !s.bought);
+        if (!slot || p.crystals < slot.price) return;
+        p.crystals -= slot.price;
+        slot.bought = true;
+        withRoom(room, () => applyShopItem(p, slot.id));
+        ws.send(JSON.stringify({ type: 'buy_confirm', slotId: msg.slotId, newBalance: p.crystals }));
+      }
+
+      // ── Player ready (shop) ────────────────────────────────────────────
+      if (msg.type === 'player_ready') {
+        const room = ws.room;
+        if (!room) return;
+        if (room.gameState.wavePhase !== 'shop') return;
+        room.gameState.playersReady.add(ws.playerId);
+        broadcastRoom(room, { type: 'player_ready_update', ready: [...room.gameState.playersReady] });
+      }
+
+      // ── Reroll shop ──────────────────────────────────────────────────────
+      if (msg.type === 'reroll_shop') {
+        const room = ws.room;
+        if (!room) return;
+        if (room.gameState.wavePhase !== 'shop') return;
+        const p = room.gameState.players.get(ws.playerId);
+        if (!p) return;
+        const cost = REROLL_BASE_COST * (p.rerollCount + 1);
+        if (p.crystals < cost) return;
+        p.crystals -= cost;
+        p.rerollCount++;
+        const diff = room.gameState.settings.difficulty;
+        const items = generateShopItems(diff);
+        room.gameState.shopItems.set(p.id, items);
+        const nextCost = REROLL_BASE_COST * (p.rerollCount + 1);
+        ws.send(JSON.stringify({ type: 'shop_open', items, balance: p.crystals, wave: room.gameState.wave, rerollCost: nextCost }));
       }
 
       // ── Quitter la salle (retour menu) ──────────────────────────────────

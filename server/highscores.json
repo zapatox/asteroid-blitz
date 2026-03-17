@@ -131,5 +131,13 @@
       "score": 10,
       "date": 1773612280922
     }
+  ],
+  "normal_wave8": [
+    {
+      "name": "TEST",
+      "score": 3450,
+      "date": 1773746774367,
+      "version": "v0.4.0"
+    }
   ]
 }

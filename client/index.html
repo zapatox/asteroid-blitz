@@ -81,11 +81,12 @@
 
     <div id="version-box">
       <div id="version-header" onclick="document.getElementById('changelog').classList.toggle('open')">
-        <span id="version-tag">v0.4.0</span>
+        <span id="version-tag">v0.5.0</span>
         <span id="version-arrow">▼</span>
       </div>
       <div id="changelog">
-        <div class="cl-entry">Orages d'astéroïdes dynamiques avec flèches directionnelles<br>Intensité des orages selon le temps et la difficulté<br>Nettoyage complet entre les parties (boss, ennemis, etc.)<br>Correction de la visée en ligne<br>Interpolation fluide du vaisseau local<br>Ennemis moins résistants en mode normal (2 HP)<br>Retour au menu après game over</div>
+        <div class="cl-entry"><b>v0.5.0</b> — Shop reroll (coût croissant) · Prix ajustés par difficulté · Correction du freeze entre les vagues · Items rééquilibrés (drop vs shop) · Drops d'armes en quantité réduite</div>
+        <div class="cl-entry"><b>v0.4.0</b> — Orages d'astéroïdes dynamiques · Flèches directionnelles · Nettoyage entre parties · Visée en ligne corrigée · Interpolation fluide · Ennemis normal 2 HP</div>
       </div>
     </div>
   </div>
@@ -99,11 +100,6 @@
           <button class="btn-option" data-val="easy">FACILE</button>
           <button class="btn-option active" data-val="normal">NORMAL</button>
           <button class="btn-option" data-val="hardcore">HARDCORE</button>
-        </div>
-        <div class="btn-group" id="hs-dur-btns">
-          <button class="btn-option" data-val="180">3 MIN</button>
-          <button class="btn-option active" data-val="300">5 MIN</button>
-          <button class="btn-option" data-val="600">10 MIN</button>
         </div>
       </div>
       <div id="hs-table">
@@ -133,21 +129,13 @@
     <!-- Settings host only -->
     <div id="host-settings" style="display:none">
       <div class="setting-group">
-        <div class="setting-label">DURÉE</div>
-        <div class="btn-group" id="duration-btns">
-          <button class="btn-option" data-val="180">3 MIN</button>
-          <button class="btn-option active" data-val="300">5 MIN</button>
-          <button class="btn-option" data-val="600">10 MIN</button>
-        </div>
-      </div>
-      <div class="setting-group">
         <div class="setting-label">DIFFICULTÉ</div>
         <div class="btn-group" id="difficulty-btns">
           <button class="btn-option" data-val="easy">FACILE</button>
           <button class="btn-option active" data-val="normal">NORMAL</button>
           <button class="btn-option" data-val="hardcore">HARDCORE</button>
         </div>
-        <div class="difficulty-desc" id="diff-desc">Ennemis IA modérés · Boss final</div>
+        <div class="difficulty-desc" id="diff-desc">Ennemis wave 3 · Boss wave 8</div>
       </div>
     </div>
 
@@ -162,6 +150,16 @@
   <div id="boss-hud" style="display:none">
     <div class="boss-label">⚠ BOSS ⚠</div>
     <div class="boss-hp-bar"><div class="boss-hp-fill" id="boss-hp-fill"></div></div>
+  </div>
+
+  <!-- Shop entre les vagues -->
+  <div id="shop-screen" class="screen" style="display:none">
+    <h2 id="shop-title" class="shop-title">VAGUE 1 TERMINÉE</h2>
+    <div id="shop-balance" class="shop-balance">0 💎</div>
+    <div id="shop-grid" class="shop-grid"></div>
+    <button id="shop-reroll-btn" class="btn-neon btn-reroll">🔄 REROLL — 25 💎</button>
+    <div id="shop-ready-count" class="shop-ready-count"></div>
+    <button id="shop-ready-btn" class="btn-neon btn-ready">PRÊT</button>
   </div>
 
   <!-- HUD en jeu -->

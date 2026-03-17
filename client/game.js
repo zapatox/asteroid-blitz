@@ -1037,8 +1037,9 @@ function removePickup(id) {
 
 // ─── Ennemis IA ──────────────────────────────────────────────────────────────
 
-let gameDuration = 300;
 let gameDifficulty = 'normal';
+let gameBossWave = 8;
+let gameWave = 0;
 const enemyMeshes = new Map();
 
 function getOrCreateEnemy(snap) {
@@ -1484,16 +1485,19 @@ let prevScores  = {};
 
 function updateHUD(snap) {
   if (!snap) return;
-  const dur = snap.duration || gameDuration || 300;
-  if (snap.boss && snap.boss.alive) {
+  // Timer display
+  if (snap.wavePhase === 'boss') {
     timerEl.textContent = '⚠ BOSS';
     timerEl.style.color = '#ff3333';
+  } else if (snap.wavePhase === 'fighting') {
+    timerEl.textContent = `WAVE ${snap.wave} — ${snap.waveTimeLeft}s`;
+    timerEl.style.color = snap.waveTimeLeft <= 10 ? '#ff3333' : '';
+  } else if (snap.wavePhase === 'intermission') {
+    timerEl.textContent = `WAVE ${snap.wave} ✓`;
+    timerEl.style.color = '#00ff88';
   } else {
-    const remaining = Math.max(0, dur - (snap.elapsed || 0));
-    const m = Math.floor(remaining / 60);
-    const s = Math.floor(remaining % 60);
-    timerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
-    timerEl.style.color = remaining <= 30 ? '#ff3333' : '';
+    timerEl.textContent = 'SHOP';
+    timerEl.style.color = '#ffaa00';
   }
 
   scoresEl.innerHTML = '';
@@ -1518,7 +1522,8 @@ function updateHUD(snap) {
       <div class="name">${p.name}</div>
       <div class="hp-row"><span class="lives-display">${livesStr}</span><div class="hp-dots">${dots}</div></div>
       ${fx.join('')}
-      <div class="crystals">💎 ${p.score}</div>
+      <div class="crystals">💎 ${p.crystals || 0}</div>
+      <div class="score-line">⭐ ${p.score}</div>
     `;
     scoresEl.appendChild(card);
 
@@ -1685,7 +1690,7 @@ function triggerPickupFlash(pickupType) {
 
 // ─── Gestion events serveur ───────────────────────────────────────────────────
 
-const EVENT_TYPES = new Set(['bolt','shot_fired','asteroid_destroyed','deflect','player_hit','player_killed','pickup_collected','missile_hit','border_zap','loot_dropped','nuke_activated','drone_shot','asteroid_storm','asteroid_storm_warning','pickup_despawn','gravwell_placed','enemy_killed','boss_killed','boss_special']);
+const EVENT_TYPES = new Set(['bolt','shot_fired','asteroid_destroyed','deflect','player_hit','player_killed','pickup_collected','missile_hit','border_zap','loot_dropped','nuke_activated','drone_shot','asteroid_storm','asteroid_storm_warning','pickup_despawn','gravwell_placed','enemy_killed','boss_killed','boss_special','wave_complete']);
 
 function handleEvent(msg) {
   // Laser (hitscan) — dessiner le rayon instantané
@@ -1841,6 +1846,100 @@ function handleEvent(msg) {
     triggerShake(8);
     playSound('explode');
   }
+
+  if (msg.type === 'wave_complete') {
+    showAnnouncement(`WAVE ${msg.wave} COMPLETE!`, '#00ff88');
+  }
+}
+
+// ─── Shop ──────────────────────────────────────────────────────────────────
+let shopItems = [];
+let shopBalance = 0;
+let shopRerollCost = 25;
+
+function renderShop(items, balance, wave, rerollCost) {
+  shopItems = items;
+  shopBalance = balance;
+  if (rerollCost !== undefined) shopRerollCost = rerollCost;
+  const shopEl = document.getElementById('shop-screen');
+  const titleEl = document.getElementById('shop-title');
+  const balanceEl = document.getElementById('shop-balance');
+  const gridEl = document.getElementById('shop-grid');
+  const readyBtn = document.getElementById('shop-ready-btn');
+  const rerollBtn = document.getElementById('shop-reroll-btn');
+
+  titleEl.textContent = `VAGUE ${wave} TERMINÉE`;
+  balanceEl.textContent = `${balance} 💎`;
+
+  gridEl.innerHTML = items.map(item => `
+    <div class="shop-card ${item.bought ? 'bought' : ''} ${balance < item.price ? 'too-expensive' : ''}" data-slot="${item.slotId}">
+      <div class="shop-icon">${item.icon}</div>
+      <div class="shop-item-name">${item.name}</div>
+      <div class="shop-desc">${item.desc}</div>
+      <div class="shop-price">${item.price} 💎</div>
+      <button class="shop-buy-btn" ${item.bought || balance < item.price ? 'disabled' : ''}>
+        ${item.bought ? 'ACHETÉ' : 'ACHETER'}
+      </button>
+    </div>
+  `).join('');
+
+  // Buy handlers
+  gridEl.querySelectorAll('.shop-buy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.shop-card');
+      const slotId = parseInt(card.dataset.slot);
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'buy_item', slotId }));
+      }
+    });
+  });
+
+  // Reroll button
+  rerollBtn.textContent = `🔄 REROLL — ${shopRerollCost} 💎`;
+  rerollBtn.disabled = balance < shopRerollCost;
+  rerollBtn.onclick = () => {
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'reroll_shop' }));
+    }
+  };
+
+  readyBtn.onclick = () => {
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'player_ready' }));
+      readyBtn.disabled = true;
+      readyBtn.textContent = 'EN ATTENTE...';
+    }
+  };
+  readyBtn.disabled = false;
+  readyBtn.textContent = 'PRÊT';
+}
+
+function updateShopAfterBuy(slotId, newBalance) {
+  shopBalance = newBalance;
+  const balanceEl = document.getElementById('shop-balance');
+  balanceEl.textContent = `${newBalance} 💎`;
+
+  // Update card
+  const card = document.querySelector(`.shop-card[data-slot="${slotId}"]`);
+  if (card) {
+    card.classList.add('bought');
+    const btn = card.querySelector('.shop-buy-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'ACHETÉ'; }
+  }
+
+  // Update affordability of remaining cards
+  document.querySelectorAll('.shop-card:not(.bought)').forEach(card => {
+    const priceText = card.querySelector('.shop-price')?.textContent;
+    const price = parseInt(priceText);
+    if (newBalance < price) {
+      card.classList.add('too-expensive');
+      const btn = card.querySelector('.shop-buy-btn');
+      if (btn) btn.disabled = true;
+    }
+  });
+  // Update reroll affordability
+  const rerollBtn = document.getElementById('shop-reroll-btn');
+  if (rerollBtn) rerollBtn.disabled = newBalance < shopRerollCost;
 }
 
 // ─── Écrans ───────────────────────────────────────────────────────────────────
@@ -1872,10 +1971,12 @@ function showScreen(name) {
   screenJoin.style.display     = name === 'join'     ? 'flex' : 'none';
   screenWaiting.style.display  = name === 'waiting'  ? 'flex' : 'none';
   screenGameover.style.display = name === 'gameover' ? 'flex' : 'none';
-  hudEl.style.display          = name === 'hud'      ? 'block' : 'none';
-  // Hide cursor during gameplay
+  hudEl.style.display          = (name === 'hud' || name === 'shop') ? 'block' : 'none';
+  const shopScreen = document.getElementById('shop-screen');
+  if (shopScreen) shopScreen.style.display = name === 'shop' ? 'flex' : 'none';
+  // Hide cursor during gameplay (not shop/gameover)
   document.body.style.cursor = name === 'hud' ? 'none' : '';
-  // Musique : menu dans lobby/join/waiting/gameover, game en jeu
+  // Musique : menu dans lobby/join/waiting/gameover/shop, game en jeu
   const wantTrack = name === 'hud' ? gameMusic : menuMusic;
   if (currentMusic !== wantTrack || wantTrack.paused) {
     stopMusic();
@@ -2025,8 +2126,9 @@ function connect() {
     }
 
     if (msg.type === 'start') {
-      gameDuration = msg.duration || 300;
       gameDifficulty = msg.difficulty || 'normal';
+      gameBossWave = msg.bossWave || 8;
+      gameWave = msg.wave || 1;
       showScreen('hud');
       prevScores = {};
       // Clear ALL game meshes on new game
@@ -2039,6 +2141,34 @@ function connect() {
       for (const [id] of playerMeshes) removePlayer(id);
       hideStormWarning();
       prevSnapshot = null; currSnapshot = null;
+    }
+
+    if (msg.type === 'shop_open') {
+      showScreen('shop');
+      renderShop(msg.items, msg.balance, msg.wave, msg.rerollCost);
+    }
+
+    if (msg.type === 'buy_confirm') {
+      updateShopAfterBuy(msg.slotId, msg.newBalance);
+    }
+
+    if (msg.type === 'player_ready_update') {
+      // Update ready indicators
+      const readyCountEl = document.getElementById('shop-ready-count');
+      if (readyCountEl) {
+        const total = currSnapshot ? currSnapshot.players.length : 1;
+        readyCountEl.textContent = `${msg.ready.length}/${total} prêts`;
+      }
+    }
+
+    if (msg.type === 'wave_start') {
+      showScreen('hud');
+      // Show wave announcement
+      showAnnouncement(msg.isBoss ? '⚠ BOSS INCOMING ⚠' : `WAVE ${msg.wave}`, msg.isBoss ? '#ff3333' : '#00ffff');
+    }
+
+    if (msg.type === 'wave_complete') {
+      // handled by event in snapshot
     }
 
     if (msg.type === 'snapshot') {
@@ -2065,6 +2195,11 @@ function connect() {
 
     if (msg.type === 'gameover') {
       showScreen('gameover');
+      const titleEl = document.querySelector('.gameover-title');
+      if (titleEl) {
+        titleEl.textContent = msg.reason === 'bosskilled' ? 'VICTOIRE !' : 'DÉFAITE';
+        titleEl.style.color = msg.reason === 'bosskilled' ? '#00ff88' : '#ff3333';
+      }
       document.getElementById('gameover-scores').innerHTML = msg.scores.map((s, i) =>
         `<div class="go-entry" style="border-color:${s.color};color:${s.color}">
           ${i === 0 ? '🏆' : `#${i+1}`} ${s.name} — ${s.score} 💎
@@ -2132,20 +2267,10 @@ inputCode.addEventListener('input', () => { inputCode.value = inputCode.value.to
 btnJoinCancel.addEventListener('click', () => showScreen('lobby'));
 
 // Lancer la partie (host uniquement) avec settings
-let selectedDuration = 300;
 let selectedDifficulty = 'normal';
 
-// Boutons durée
-document.querySelectorAll('#duration-btns .btn-option').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('#duration-btns .btn-option').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    selectedDuration = parseInt(btn.dataset.val);
-  });
-});
-
 // Boutons difficulté
-const diffDescs = { easy: 'Pas d\'ennemis · Boss final', normal: 'Ennemis IA modérés · Boss final', hardcore: 'Ennemis agressifs · Boss puissant' };
+const diffDescs = { easy: 'Pas de PvP · Boss wave 10', normal: 'Ennemis wave 3 · Boss wave 8', hardcore: 'Ennemis wave 2 · Boss wave 6' };
 document.querySelectorAll('#difficulty-btns .btn-option').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('#difficulty-btns .btn-option').forEach(b => b.classList.remove('active'));
@@ -2158,7 +2283,6 @@ document.querySelectorAll('#difficulty-btns .btn-option').forEach(btn => {
 btnStartGame.addEventListener('click', () => {
   if (ws?.readyState === 1) ws.send(JSON.stringify({
     type: 'start_game',
-    duration: selectedDuration,
     difficulty: selectedDifficulty,
   }));
 });
@@ -2180,12 +2304,10 @@ btnMenu.addEventListener('click', () => {
 
 let hsData = {};
 let hsDiff = 'normal';
-let hsDur = '300';
 
 const hsPanel = document.getElementById('highscores-panel');
 const hsTable = document.getElementById('hs-table');
 const hsDiffBtns = document.getElementById('hs-diff-btns');
-const hsDurBtns = document.getElementById('hs-dur-btns');
 
 document.getElementById('btn-highscores').addEventListener('click', () => {
   if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'get_highscores' }));
@@ -2206,17 +2328,9 @@ hsDiffBtns.addEventListener('click', e => {
   renderHighscores();
 });
 
-hsDurBtns.addEventListener('click', e => {
-  const btn = e.target.closest('.btn-option');
-  if (!btn) return;
-  hsDurBtns.querySelectorAll('.btn-option').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  hsDur = btn.dataset.val;
-  renderHighscores();
-});
-
 function renderHighscores() {
-  const key = `${hsDiff}_${hsDur}`;
+  const bossWaves = { easy: 10, normal: 8, hardcore: 6 };
+  const key = `${hsDiff}_wave${bossWaves[hsDiff] || 8}`;
   const scores = hsData[key] || [];
   if (scores.length === 0) {
     hsTable.innerHTML = '<div class="hs-empty">Aucun score enregistré</div>';
