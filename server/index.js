@@ -152,12 +152,9 @@ let gameState = null;
 
 const rooms = new Map(); // code → Room
 const allWs = new Set(); // all connected websockets
-let fakeMinPlayers = Math.floor(Math.random() * 7) + 2; // 2-8
-setInterval(() => { fakeMinPlayers = Math.floor(Math.random() * 7) + 2; }, (180 + Math.random() * 120) * 1000);
 
 function broadcastPlayerCount() {
-  const count = Math.max(allWs.size, fakeMinPlayers);
-  const msg = JSON.stringify({ type: 'player_count', count });
+  const msg = JSON.stringify({ type: 'player_count', count: allWs.size });
   for (const ws of allWs) { try { ws.send(msg); } catch {} }
 }
 
