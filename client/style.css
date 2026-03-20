@@ -1382,6 +1382,11 @@ button:active { transform: scale(0.97); }
    SHOP
    ════════════════════════════════════════════════════════════ */
 
+#shop-screen {
+  background: var(--bg);
+  z-index: 100;
+}
+
 .shop-title {
   font-family: 'Orbitron', monospace;
   color: #00ff88;

@@ -1,7 +1,7 @@
 // Asteroid Blitz — Serveur autoritaire Bun WebSockets (multi-salles)
 // Lancer : bun run server/index.js
 
-const GAME_VERSION = 'v0.5.0';
+const GAME_VERSION = 'v0.6.1';
 
 // Wave system
 const WAVE_CONFIG = {
@@ -14,8 +14,10 @@ const SHOP_TIMEOUT_TICKS = 600;  // 30s max
 
 const PORT = process.env.PORT || 3000;
 const TICK_MS = 50;
-const WORLD = 800;
-const HALF = WORLD / 2;
+const WORLD_W = 1420;
+const WORLD_H = 800;
+const HALF_W = WORLD_W / 2;
+const HALF_H = WORLD_H / 2;
 const MAX_ASTEROIDS = 22;
 const THRUST_FORCE = 320;
 const TURN_SPEED = 2.8;
@@ -58,7 +60,7 @@ const BULLET_SPEED = 520;
 const MISSILE_SPEED = 280;
 const BULLET_RADIUS = 3;
 const MISSILE_RADIUS = 8;
-const LASER_RANGE = 420;
+const LASER_RANGE = 1650;
 const MISSILE_AOE = 95;
 const KNOCKBACK_BULLET = 90;
 const KNOCKBACK_MISSILE = 200;
@@ -309,10 +311,10 @@ function spawnAsteroid() {
 
   const side = Math.floor(Math.random() * 4);
   let x, y;
-  if (side === 0) { x = -HALF; y = (Math.random() - 0.5) * WORLD; }
-  else if (side === 1) { x = HALF; y = (Math.random() - 0.5) * WORLD; }
-  else if (side === 2) { x = (Math.random() - 0.5) * WORLD; y = -HALF; }
-  else { x = (Math.random() - 0.5) * WORLD; y = HALF; }
+  if (side === 0) { x = -HALF_W; y = (Math.random() - 0.5) * WORLD_H; }
+  else if (side === 1) { x = HALF_W; y = (Math.random() - 0.5) * WORLD_H; }
+  else if (side === 2) { x = (Math.random() - 0.5) * WORLD_W; y = -HALF_H; }
+  else { x = (Math.random() - 0.5) * WORLD_W; y = HALF_H; }
 
   const speed = 25 + Math.random() * 60;
   const dir = Math.random() * Math.PI * 2;
@@ -422,13 +424,13 @@ function integratePlayer(p) {
   p.x += p.vx * DT;
   p.y += p.vy * DT;
   // Bordure électrique : toucher le bord = dégât + rebond
-  const BORDER_MARGIN = HALF - 5;
-  if (Math.abs(p.x) > BORDER_MARGIN || Math.abs(p.y) > BORDER_MARGIN) {
+  const BORDER_MX = HALF_W - 5, BORDER_MY = HALF_H - 5;
+  if (Math.abs(p.x) > BORDER_MX || Math.abs(p.y) > BORDER_MY) {
     // Rebond : repousse le joueur vers le centre
-    if (p.x > BORDER_MARGIN)  { p.x = BORDER_MARGIN - 10; p.vx = -200; }
-    if (p.x < -BORDER_MARGIN) { p.x = -BORDER_MARGIN + 10; p.vx = 200; }
-    if (p.y > BORDER_MARGIN)  { p.y = BORDER_MARGIN - 10; p.vy = -200; }
-    if (p.y < -BORDER_MARGIN) { p.y = -BORDER_MARGIN + 10; p.vy = 200; }
+    if (p.x > BORDER_MX)  { p.x = BORDER_MX - 10; p.vx = -200; }
+    if (p.x < -BORDER_MX) { p.x = -BORDER_MX + 10; p.vx = 200; }
+    if (p.y > BORDER_MY)  { p.y = BORDER_MY - 10; p.vy = -200; }
+    if (p.y < -BORDER_MY) { p.y = -BORDER_MY + 10; p.vy = 200; }
     p.borderKill = true; // flag pour gameTick
   }
 
@@ -442,13 +444,12 @@ function integrateAsteroid(a) {
     a.x += a.vx * DT;
     a.y += a.vy * DT;
     // Marqué pour suppression quand sorti de l'autre côté
-    const margin = HALF + 50;
-    if (a.x > margin || a.x < -margin || a.y > margin || a.y < -margin) {
+    if (a.x > HALF_W + 50 || a.x < -HALF_W - 50 || a.y > HALF_H + 50 || a.y < -HALF_H - 50) {
       a.expired = true;
     }
   } else {
-    a.x = wrap(a.x + a.vx * DT, HALF);
-    a.y = wrap(a.y + a.vy * DT, HALF);
+    a.x = wrap(a.x + a.vx * DT, HALF_W);
+    a.y = wrap(a.y + a.vy * DT, HALF_H);
   }
 }
 
@@ -608,7 +609,7 @@ function integrateProjectiles(events) {
     proj.y += proj.vy * DT;
 
     // Mur = destruction
-    if (Math.abs(proj.x) > HALF || Math.abs(proj.y) > HALF) {
+    if (Math.abs(proj.x) > HALF_W || Math.abs(proj.y) > HALF_H) {
       gameState.projectiles.delete(proj.id);
       continue;
     }
@@ -1021,10 +1022,10 @@ function spawnEnemy() {
   const side = Math.floor(Math.random() * 4);
   const hard = gameState.settings.difficulty === 'hardcore';
   let x, y;
-  if (side === 0) { x = -HALF + 50; y = (Math.random() - 0.5) * WORLD; }
-  else if (side === 1) { x = HALF - 50; y = (Math.random() - 0.5) * WORLD; }
-  else if (side === 2) { y = -HALF + 50; x = (Math.random() - 0.5) * WORLD; }
-  else { y = HALF - 50; x = (Math.random() - 0.5) * WORLD; }
+  if (side === 0) { x = -HALF_W + 50; y = (Math.random() - 0.5) * WORLD_H; }
+  else if (side === 1) { x = HALF_W - 50; y = (Math.random() - 0.5) * WORLD_H; }
+  else if (side === 2) { y = -HALF_H + 50; x = (Math.random() - 0.5) * WORLD_W; }
+  else { y = HALF_H - 50; x = (Math.random() - 0.5) * WORLD_W; }
 
   const enemy = {
     id, x, y, vx: 0, vy: 0, angle: Math.random() * Math.PI * 2,
@@ -1052,10 +1053,10 @@ function integrateEnemy(e, events) {
         e.alive = true;
         e.hp = e.maxHp;
         const side = Math.floor(Math.random() * 4);
-        if (side === 0) { e.x = -HALF + 50; e.y = (Math.random() - 0.5) * WORLD; }
-        else if (side === 1) { e.x = HALF - 50; e.y = (Math.random() - 0.5) * WORLD; }
-        else if (side === 2) { e.y = -HALF + 50; e.x = (Math.random() - 0.5) * WORLD; }
-        else { e.y = HALF - 50; e.x = (Math.random() - 0.5) * WORLD; }
+        if (side === 0) { e.x = -HALF_W + 50; e.y = (Math.random() - 0.5) * WORLD_H; }
+        else if (side === 1) { e.x = HALF_W - 50; e.y = (Math.random() - 0.5) * WORLD_H; }
+        else if (side === 2) { e.y = -HALF_H + 50; e.x = (Math.random() - 0.5) * WORLD_W; }
+        else { e.y = HALF_H - 50; e.x = (Math.random() - 0.5) * WORLD_W; }
       }
     }
     return;
@@ -1119,8 +1120,8 @@ function integrateEnemy(e, events) {
   e.x += e.vx * DT; e.y += e.vy * DT;
 
   // Wrap
-  if (e.x < -HALF) e.x += WORLD; if (e.x > HALF) e.x -= WORLD;
-  if (e.y < -HALF) e.y += WORLD; if (e.y > HALF) e.y -= WORLD;
+  if (e.x < -HALF_W) e.x += WORLD_W; if (e.x > HALF_W) e.x -= WORLD_W;
+  if (e.y < -HALF_H) e.y += WORLD_H; if (e.y > HALF_H) e.y -= WORLD_H;
 }
 
 function checkEnemyPlayerCollisions(events) {
@@ -1254,8 +1255,8 @@ function integrateBoss(events) {
   b.x += b.vx * DT; b.y += b.vy * DT;
 
   // Clamp to world
-  b.x = Math.max(-HALF + 20, Math.min(HALF - 20, b.x));
-  b.y = Math.max(-HALF + 20, Math.min(HALF - 20, b.y));
+  b.x = Math.max(-HALF_W + 20, Math.min(HALF_W - 20, b.x));
+  b.y = Math.max(-HALF_H + 20, Math.min(HALF_H - 20, b.y));
 
   // Contact avec les joueurs
   for (const p of gameState.players.values()) {
@@ -1546,13 +1547,12 @@ function gameTick(room) {
             let r = Math.random() * total, chosen = sizes[0];
             for (const s of sizes) { r -= s.weight; if (r <= 0) { chosen = s; break; } }
             let x, y, vx, vy;
-            const spread = (Math.random() - 0.5) * WORLD * 0.8;
             const speed = 60 + Math.random() * 80;
             const drift = (Math.random() - 0.5) * 40;
-            if (dir === 0) { x = -HALF - 20; y = spread; vx = speed; vy = drift; }
-            else if (dir === 1) { x = HALF + 20; y = spread; vx = -speed; vy = drift; }
-            else if (dir === 2) { x = spread; y = -HALF - 20; vx = drift; vy = speed; }
-            else { x = spread; y = HALF + 20; vx = drift; vy = -speed; }
+            if (dir === 0) { const spread = (Math.random() - 0.5) * WORLD_H * 0.8; x = -HALF_W - 20; y = spread; vx = speed; vy = drift; }
+            else if (dir === 1) { const spread = (Math.random() - 0.5) * WORLD_H * 0.8; x = HALF_W + 20; y = spread; vx = -speed; vy = drift; }
+            else if (dir === 2) { const spread = (Math.random() - 0.5) * WORLD_W * 0.8; x = spread; y = -HALF_H - 20; vx = drift; vy = speed; }
+            else { const spread = (Math.random() - 0.5) * WORLD_W * 0.8; x = spread; y = HALF_H + 20; vx = drift; vy = -speed; }
             const id = 'a' + (gameState.nextAsteroidId++);
             gameState.asteroids.set(id, {
               id, x, y, vx, vy,
@@ -1572,6 +1572,8 @@ function gameTick(room) {
         // Wave complete -> intermission
         gameState.wavePhase = 'intermission';
         gameState.waveTimer = INTERMISSION_TICKS;
+        // Purger tous les projectiles pour éviter le freeze côté client
+        gameState.projectiles.clear();
         events.push({ type: 'wave_complete', wave: gameState.wave });
       }
     }

@@ -4,8 +4,10 @@ import * as THREE from 'three';
 const WS_URL = location.hostname === 'localhost'
   ? `ws://${location.host}`
   : `wss://${location.host}`;
-const WORLD = 800;
-const HALF = WORLD / 2;
+const WORLD_W = 1420;
+const WORLD_H = 800;
+const HALF_W = WORLD_W / 2;
+const HALF_H = WORLD_H / 2;
 const SERVER_TICK = 50;
 
 // ─── Settings (persistés en localStorage) ────────────────────────────────────
@@ -149,7 +151,11 @@ scene.fog = new THREE.FogExp2(0x050510, 0.0008);
 
 function getOrthoSize() {
   const aspect = window.innerWidth / window.innerHeight;
-  const h = HALF + 70; // marge visible hors arène pour la transition wrap
+  const margin = 70;
+  // Ensure full map is visible regardless of screen ratio
+  const hFromHeight = HALF_H + margin;
+  const hFromWidth = (HALF_W + margin) / aspect;
+  const h = Math.max(hFromHeight, hFromWidth);
   return { w: h * aspect, h };
 }
 
@@ -196,9 +202,19 @@ scene.add(dirLight2);
 
 // ─── Grille arène ────────────────────────────────────────────────────────────
 
-const gridHelper = new THREE.GridHelper(WORLD, 32, 0x112244, 0x0a1530);
-gridHelper.rotation.x = Math.PI / 2;
-scene.add(gridHelper);
+// Custom rectangular grid
+const gridGroup = new THREE.Group();
+const gridMat = new THREE.LineBasicMaterial({ color: 0x0a1530, transparent: true, opacity: 0.6 });
+const gridStep = WORLD_H / 16; // ~50px cells
+for (let x = -HALF_W; x <= HALF_W; x += gridStep) {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, -HALF_H, 0), new THREE.Vector3(x, HALF_H, 0)]);
+  gridGroup.add(new THREE.Line(geo, gridMat));
+}
+for (let y = -HALF_H; y <= HALF_H; y += gridStep) {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-HALF_W, y, 0), new THREE.Vector3(HALF_W, y, 0)]);
+  gridGroup.add(new THREE.Line(geo, gridMat));
+}
+scene.add(gridGroup);
 
 // ── Bordures électriques ─────────────────────────────────────────────────────
 const BORDER_ARC_SEGMENTS = 40; // réduit de 80 pour perf
@@ -225,10 +241,10 @@ function createBorderArc(x1, y1, x2, y2) {
   borderArcs.push({ line, line2, x1, y1, x2, y2 });
 }
 
-createBorderArc(-HALF, -HALF, HALF, -HALF); // bottom
-createBorderArc(HALF, -HALF, HALF, HALF);   // right
-createBorderArc(HALF, HALF, -HALF, HALF);   // top
-createBorderArc(-HALF, HALF, -HALF, -HALF); // left
+createBorderArc(-HALF_W, -HALF_H, HALF_W, -HALF_H); // bottom
+createBorderArc(HALF_W, -HALF_H, HALF_W, HALF_H);   // right
+createBorderArc(HALF_W, HALF_H, -HALF_W, HALF_H);   // top
+createBorderArc(-HALF_W, HALF_H, -HALF_W, -HALF_H); // left
 
 let borderFrame = 0;
 function updateBorderArcs() {
@@ -390,10 +406,16 @@ function lerpAngle(a, b, t) {
   return a + diff * t;
 }
 // FIX wrapping : évite d'interpoler à travers le bord de la carte
-function lerpWrap(a, b, t) {
+function lerpWrapX(a, b, t) {
   let d = b - a;
-  if (d > HALF)  d -= WORLD;
-  if (d < -HALF) d += WORLD;
+  if (d > HALF_W)  d -= WORLD_W;
+  if (d < -HALF_W) d += WORLD_W;
+  return a + d * t;
+}
+function lerpWrapY(a, b, t) {
+  let d = b - a;
+  if (d > HALF_H)  d -= WORLD_H;
+  if (d < -HALF_H) d += WORLD_H;
   return a + d * t;
 }
 
@@ -524,8 +546,8 @@ function updatePlayerMesh(snap, alpha) {
   if (prevSnapshot && alpha < 1) {
     const prev = prevSnapshot.players.find(p => p.id === snap.id);
     if (prev) {
-      x = lerpWrap(prev.x, snap.x, alpha);
-      y = lerpWrap(prev.y, snap.y, alpha);
+      x = lerpWrapX(prev.x, snap.x, alpha);
+      y = lerpWrapY(prev.y, snap.y, alpha);
       angle = lerpAngle(prev.angle, snap.angle, alpha);
     }
   }
@@ -822,17 +844,17 @@ function updateAsteroidMesh(snap, alpha) {
 
   let dx = targetX - obj.dispX;
   let dy = targetY - obj.dispY;
-  if (dx >  HALF) dx -= WORLD;
-  if (dx < -HALF) dx += WORLD;
-  if (dy >  HALF) dy -= WORLD;
-  if (dy < -HALF) dy += WORLD;
+  if (dx >  HALF_W) dx -= WORLD_W;
+  if (dx < -HALF_W) dx += WORLD_W;
+  if (dy >  HALF_H) dy -= WORLD_H;
+  if (dy < -HALF_H) dy += WORLD_H;
   // Lerp plus agressif (0.5) car l'extrapolation donne une cible précise
   obj.dispX += dx * 0.5;
   obj.dispY += dy * 0.5;
-  if (obj.dispX >  HALF + GHOST_FADE) obj.dispX -= WORLD;
-  if (obj.dispX < -(HALF + GHOST_FADE)) obj.dispX += WORLD;
-  if (obj.dispY >  HALF + GHOST_FADE) obj.dispY -= WORLD;
-  if (obj.dispY < -(HALF + GHOST_FADE)) obj.dispY += WORLD;
+  if (obj.dispX >  HALF_W + GHOST_FADE) obj.dispX -= WORLD_W;
+  if (obj.dispX < -(HALF_W + GHOST_FADE)) obj.dispX += WORLD_W;
+  if (obj.dispY >  HALF_H + GHOST_FADE) obj.dispY -= WORLD_H;
+  if (obj.dispY < -(HALF_H + GHOST_FADE)) obj.dispY += WORLD_H;
 
   const x = obj.dispX, y = obj.dispY;
   const rz = snap.angle + mesh.userData.rotOffset.x;
@@ -871,17 +893,17 @@ function updateAsteroidMesh(snap, alpha) {
   }
 
   // ── Opacité main : fondu en sortant de l'arène ────────────────────────────
-  const exitDist = Math.max(0, Math.max(Math.abs(x), Math.abs(y)) - HALF);
+  const exitDist = Math.max(0, Math.max(Math.abs(x) - HALF_W, Math.abs(y) - HALF_H));
   const mainOp   = Math.max(0, 1 - exitDist / GHOST_FADE);
   innerMat.transparent = mainOp < 0.999;
   innerMat.opacity     = mainOp;
 
   // ── Copies fantômes ───────────────────────────────────────────────────────
   const ghostDefs = [];
-  if (x >  HALF - GHOST_MARGIN) ghostDefs.push([-WORLD, 0]);
-  if (x < -HALF + GHOST_MARGIN) ghostDefs.push([ WORLD, 0]);
-  if (y >  HALF - GHOST_MARGIN) ghostDefs.push([0, -WORLD]);
-  if (y < -HALF + GHOST_MARGIN) ghostDefs.push([0,  WORLD]);
+  if (x >  HALF_W - GHOST_MARGIN) ghostDefs.push([-WORLD_W, 0]);
+  if (x < -HALF_W + GHOST_MARGIN) ghostDefs.push([ WORLD_W, 0]);
+  if (y >  HALF_H - GHOST_MARGIN) ghostDefs.push([0, -WORLD_H]);
+  if (y < -HALF_H + GHOST_MARGIN) ghostDefs.push([0,  WORLD_H]);
   if (ghostDefs.length >= 2 &&
       Math.abs(ghostDefs[0][0]) > 0 && Math.abs(ghostDefs[1][1]) > 0) {
     ghostDefs.push([ghostDefs[0][0], ghostDefs[1][1]]);
@@ -896,7 +918,7 @@ function updateAsteroidMesh(snap, alpha) {
       g.rotation.z = rz;
       g.rotation.x = rx;
       g.visible = true;
-      const insideDist = Math.min(HALF - Math.abs(gx), HALF - Math.abs(gy));
+      const insideDist = Math.min(HALF_W - Math.abs(gx), HALF_H - Math.abs(gy));
       const ghostOp = Math.max(0, Math.min(1, insideDist / GHOST_FADE));
       g.userData.innerMesh.material.opacity = ghostOp;
       g.userData.edges.material.opacity = edgePulse * ghostOp;
@@ -1083,8 +1105,8 @@ function updateEnemyMesh(snap, alpha) {
   if (prevSnapshot && alpha < 1) {
     const prev = (prevSnapshot.enemies || []).find(e => e.id === snap.id);
     if (prev && prev.alive) {
-      x = lerpWrap(prev.x, snap.x, alpha);
-      y = lerpWrap(prev.y, snap.y, alpha);
+      x = lerpWrapX(prev.x, snap.x, alpha);
+      y = lerpWrapY(prev.y, snap.y, alpha);
       angle = lerpAngle(prev.angle, snap.angle, alpha);
     }
   }
@@ -1153,8 +1175,8 @@ function updateBossMesh(bossSnap, alpha) {
   // Interpolation boss
   let x = bossSnap.x, y = bossSnap.y, angle = bossSnap.angle;
   if (prevSnapshot && prevSnapshot.boss && prevSnapshot.boss.alive && alpha < 1) {
-    x = lerpWrap(prevSnapshot.boss.x, bossSnap.x, alpha);
-    y = lerpWrap(prevSnapshot.boss.y, bossSnap.y, alpha);
+    x = lerpWrapX(prevSnapshot.boss.x, bossSnap.x, alpha);
+    y = lerpWrapY(prevSnapshot.boss.y, bossSnap.y, alpha);
     angle = lerpAngle(prevSnapshot.boss.angle, bossSnap.angle, alpha);
   }
   obj.group.position.set(x, y, 0);
@@ -1233,12 +1255,18 @@ function updateParticles(dt) {
 // ─── Projectiles (rendu depuis snapshot serveur) ──────────────────────────────
 
 // Laser pool (hitscan côté serveur, rendu instantané côté client)
+// Each laser = core line + wide glow line + impact flash
 const laserPool = [];
 for (let i = 0; i < 8; i++) {
   const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-  const mat = new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0 });
+  const mat = new THREE.LineBasicMaterial({ color: 0xaaddff, transparent: true, opacity: 0, linewidth: 2 });
   const line = new THREE.Line(geo, mat);
-  line.userData = { active: false, life: 0 };
+  // Glow layer (wider, softer)
+  const glowGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const glowMat = new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, linewidth: 1 });
+  const glowLine = new THREE.Line(glowGeo, glowMat);
+  scene.add(glowLine);
+  line.userData = { active: false, life: 0, glow: glowLine };
   scene.add(line);
   laserPool.push(line);
 }
@@ -1249,21 +1277,31 @@ function spawnLaser(x, y, tx, ty, color) {
   const pos = line.geometry.attributes.position.array;
   pos[0]=x; pos[1]=y; pos[2]=2; pos[3]=tx; pos[4]=ty; pos[5]=2;
   line.geometry.attributes.position.needsUpdate = true;
-  line.material.color.setHex(hexToInt(color) || 0x4488ff);
+  const hex = hexToInt(color) || 0x4488ff;
+  line.material.color.setHex(0xffffff); // bright white core
   line.material.opacity = 1;
   line.userData.active = true; line.userData.life = 0;
+  // Glow
+  const glow = line.userData.glow;
+  const gPos = glow.geometry.attributes.position.array;
+  gPos[0]=x; gPos[1]=y; gPos[2]=1.5; gPos[3]=tx; gPos[4]=ty; gPos[5]=1.5;
+  glow.geometry.attributes.position.needsUpdate = true;
+  glow.material.color.setHex(hex);
+  glow.material.opacity = 0.8;
+  // Spawn impact particles at endpoint
+  spawnExplosion(tx, ty, 20, hex);
 }
 
 // Projectile meshes (créés dynamiquement depuis le snapshot serveur)
 const projectileMeshes = new Map();
-const TRAIL_LEN = 8;
+const TRAIL_LEN = 12;
 
 function getOrCreateProjectileMesh(snap) {
   let obj = projectileMeshes.get(snap.id);
   if (obj) return obj;
 
   const isMissile = snap.type === 'missile';
-  const r = isMissile ? 5 : 2.8;
+  const r = isMissile ? 5 : 3;
   const col = isMissile ? 0xff2266 : (hexToInt(snap.color) || 0xffffff);
 
   const group = new THREE.Group();
@@ -1272,9 +1310,16 @@ function getOrCreateProjectileMesh(snap) {
     new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 1 })
   );
   group.add(sphere);
+  // Glow halo around projectile
+  const glowR = isMissile ? 12 : 6;
+  const glowSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(glowR, 8, 4),
+    new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false })
+  );
+  group.add(glowSphere);
 
   // Trail
-  const trailLen = isMissile ? 12 : TRAIL_LEN;
+  const trailLen = isMissile ? 16 : TRAIL_LEN;
   const trailPoints = [];
   for (let i = 0; i < trailLen; i++) trailPoints.push(new THREE.Vector3(snap.x, snap.y, 2));
   const trailGeo = new THREE.BufferGeometry().setFromPoints(trailPoints);
@@ -1345,83 +1390,20 @@ function removeProjectile(id) {
 // Screen shake
 let shakeIntensity = 0;
 
-// ─── Wave clear animation ─────────────────────────────────────────────────────
-let waveClearActive = false;
-let waveClearStart = 0;
-const WAVE_CLEAR_DURATION = 1200; // ms
-
-function startWaveClearAnimation() {
-  waveClearActive = true;
-  waveClearStart = performance.now();
-  // Snapshot velocities for outward drift
-  for (const [, obj] of asteroidMeshes) {
-    const dx = obj.mesh.position.x, dy = obj.mesh.position.y;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    obj.mesh.userData.clearVx = (dx / len) * 180;
-    obj.mesh.userData.clearVy = (dy / len) * 180;
-  }
-  for (const [, obj] of pickupMeshes) {
-    const dx = obj.position.x, dy = obj.position.y;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    obj.userData.clearVx = (dx / len) * 220;
-    obj.userData.clearVy = (dy / len) * 220;
-  }
-  for (const [, obj] of projectileMeshes) {
-    obj.userData.clearVx = (Math.random() - 0.5) * 400;
-    obj.userData.clearVy = (Math.random() - 0.5) * 400;
-  }
-  for (const [, obj] of enemyMeshes) {
-    const dx = obj.group.position.x, dy = obj.group.position.y;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    obj.group.userData.clearVx = (dx / len) * 200;
-    obj.group.userData.clearVy = (dy / len) * 200;
-  }
-}
-
-function updateWaveClear(dt) {
-  if (!waveClearActive) return;
-  const elapsed = performance.now() - waveClearStart;
-  const t = Math.min(elapsed / WAVE_CLEAR_DURATION, 1);
-  const opacity = Math.max(0, 1 - t * 1.8);
-
-  for (const [, obj] of asteroidMeshes) {
-    const vx = obj.mesh.userData.clearVx || 0, vy = obj.mesh.userData.clearVy || 0;
-    obj.mesh.position.x += vx * dt;
-    obj.mesh.position.y += vy * dt;
-    obj.mesh.traverse(child => { if (child.material) { child.material.transparent = true; child.material.opacity = opacity; } });
-  }
-  for (const [, obj] of pickupMeshes) {
-    obj.position.x += (obj.userData.clearVx || 0) * dt;
-    obj.position.y += (obj.userData.clearVy || 0) * dt;
-    obj.traverse(child => { if (child.material) { child.material.transparent = true; child.material.opacity = opacity; } });
-  }
-  for (const [, obj] of projectileMeshes) {
-    obj.position.x += (obj.userData.clearVx || 0) * dt;
-    obj.position.y += (obj.userData.clearVy || 0) * dt;
-    if (obj.material) { obj.material.transparent = true; obj.material.opacity = opacity; }
-  }
-  for (const [, obj] of enemyMeshes) {
-    obj.group.position.x += (obj.group.userData.clearVx || 0) * dt;
-    obj.group.position.y += (obj.group.userData.clearVy || 0) * dt;
-    obj.group.traverse(child => { if (child.material) { child.material.transparent = true; child.material.opacity = opacity; } });
-  }
-
-  if (t >= 1) {
-    waveClearActive = false;
-    for (const [id] of [...asteroidMeshes]) removeAsteroid(id);
-    for (const [id] of [...pickupMeshes]) removePickup(id);
-    for (const [id] of [...projectileMeshes]) removeProjectile(id);
-    for (const [id] of [...enemyMeshes]) removeEnemy(id);
-  }
-}
 function triggerShake(power) { shakeIntensity = Math.max(shakeIntensity, power); }
 
 function updateLasers(dt) {
   for (const line of laserPool) {
     if (!line.userData.active) continue;
     line.userData.life += dt;
-    line.material.opacity = Math.max(0, 1 - line.userData.life / 0.30);
-    if (line.userData.life > 0.30) line.userData.active = false;
+    const t = line.userData.life / 0.35;
+    line.material.opacity = Math.max(0, 1 - t);
+    const glow = line.userData.glow;
+    if (glow) glow.material.opacity = Math.max(0, 0.8 - t * 1.2);
+    if (t >= 1) {
+      line.userData.active = false;
+      if (glow) glow.material.opacity = 0;
+    }
   }
 }
 
@@ -1482,7 +1464,7 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 let dashFrame = false;
 
 // ─── Joueur local : même interpolation que les autres joueurs ─────────────────
-// Plus de prédiction/extrapolation séparée — on utilise lerpWrap(prev, curr, alpha)
+// Plus de prédiction/extrapolation séparée — on utilise lerpWrapX/Y(prev, curr, alpha)
 // directement dans updatePlayerMesh, identique aux autres joueurs.
 
 // ─── Storm Warning Arrows (flèches rouges 3D) ───────────────────────────────
@@ -1517,11 +1499,15 @@ function showStormWarning(dir) {
   const count = 5;
   for (let i = 0; i < count; i++) {
     const arrow = createArrowMesh();
-    const t = (i / (count - 1) - 0.5) * WORLD * 0.7;
-    if (dir === 0) { arrow.position.set(-HALF - 30, t, 5); arrow.rotation.z = -Math.PI / 2; }
-    else if (dir === 1) { arrow.position.set(HALF + 30, t, 5); arrow.rotation.z = Math.PI / 2; }
-    else if (dir === 2) { arrow.position.set(t, -HALF - 30, 5); arrow.rotation.z = 0; }
-    else { arrow.position.set(t, HALF + 30, 5); arrow.rotation.z = Math.PI; }
+    if (dir <= 1) {
+      const t = (i / (count - 1) - 0.5) * WORLD_H * 0.7;
+      if (dir === 0) { arrow.position.set(-HALF_W - 30, t, 5); arrow.rotation.z = -Math.PI / 2; }
+      else { arrow.position.set(HALF_W + 30, t, 5); arrow.rotation.z = Math.PI / 2; }
+    } else {
+      const t = (i / (count - 1) - 0.5) * WORLD_W * 0.7;
+      if (dir === 2) { arrow.position.set(t, -HALF_H - 30, 5); arrow.rotation.z = 0; }
+      else { arrow.position.set(t, HALF_H + 30, 5); arrow.rotation.z = Math.PI; }
+    }
     scene.add(arrow);
     stormArrows.push(arrow);
   }
@@ -1625,7 +1611,7 @@ function updateHUD(snap) {
   }
 }
 
-const CAM_H = HALF + 70; // demi-étendue caméra orthographique (doit correspondre à scene setup)
+const CAM_H = HALF_H + 70; // demi-étendue caméra orthographique (doit correspondre à scene setup)
 
 function worldToScreen(wx, wy) {
   return {
@@ -1799,6 +1785,16 @@ function handleEvent(msg) {
   // Son de tir pour bullet/missile (le visuel vient du snapshot)
   if (msg.type === 'shot_fired') {
     if (msg.playerId === myId) playSound('shoot');
+    // Muzzle flash for trishot
+    if (msg.weaponType === 'trishot') {
+      const player = currSnapshot?.players.find(p => p.id === msg.playerId);
+      if (player) spawnExplosion(player.x, player.y, 10, hexToInt(player.color) || 0x4488ff);
+    }
+    // Missile launch flash
+    if (msg.weaponType === 'missile') {
+      const player = currSnapshot?.players.find(p => p.id === msg.playerId);
+      if (player) spawnExplosion(player.x, player.y, 15, 0xff4400);
+    }
   }
 
   // Destruction d'astéroïde — immédiate (le projectile voyage réellement côté serveur)
@@ -1818,17 +1814,18 @@ function handleEvent(msg) {
   }
 
   if (msg.type === 'missile_hit') {
-    spawnExplosion(msg.x, msg.y, 130, 0xff2266);
-    spawnExplosion(msg.x, msg.y, 70, 0xffaa00);
-    spawnExplosion(msg.x, msg.y, 50, 0xffffff);
+    spawnExplosion(msg.x, msg.y, 140, 0xff2266);
+    spawnExplosion(msg.x, msg.y, 90, 0xffaa00);
+    spawnExplosion(msg.x, msg.y, 60, 0xffffff);
+    spawnExplosion(msg.x, msg.y, 40, 0xff6600);
     playSound('explode');
-    triggerShake(10);
+    triggerShake(12);
     // Flash circle
     if (!window._flashPool) {
       window._flashPool = [];
-      for (let i = 0; i < 4; i++) {
-        const geo = new THREE.CircleGeometry(1, 32);
-        const mat = new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+      for (let i = 0; i < 6; i++) {
+        const geo = new THREE.RingGeometry(0.8, 1, 32);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.visible = false;
         scene.add(mesh);
@@ -1836,12 +1833,24 @@ function handleEvent(msg) {
       }
       window._flashIdx = 0;
     }
+    // Expanding shockwave ring
     const flash = window._flashPool[window._flashIdx++ % window._flashPool.length];
-    flash.position.set(msg.x, msg.y, 2);
+    flash.position.set(msg.x, msg.y, 3);
     flash.scale.set(5, 5, 1);
-    flash.material.opacity = 0.8;
+    flash.material.color.setHex(0xff6622);
+    flash.material.opacity = 1;
     flash.visible = true;
-    flash.userData.life = 0.4;
+    flash.userData.life = 0.6;
+    flash.userData.expand = true;
+    // White core flash
+    const flash2 = window._flashPool[window._flashIdx++ % window._flashPool.length];
+    flash2.position.set(msg.x, msg.y, 4);
+    flash2.scale.set(3, 3, 1);
+    flash2.material.color.setHex(0xffffff);
+    flash2.material.opacity = 0.9;
+    flash2.visible = true;
+    flash2.userData.life = 0.3;
+    flash2.userData.expand = false;
   }
 
   if (msg.type === 'player_hit') {
@@ -1965,7 +1974,11 @@ function handleEvent(msg) {
 
   if (msg.type === 'wave_complete') {
     showAnnouncement(`WAVE ${msg.wave} COMPLETE!`, '#00ff88');
-    startWaveClearAnimation();
+    // Supprimer immédiatement tous les objets en vol pour éviter qu'ils se figent
+    for (const [id] of [...projectileMeshes]) removeProjectile(id);
+    for (const [id] of [...asteroidMeshes])   removeAsteroid(id);
+    for (const [id] of [...pickupMeshes])     removePickup(id);
+    for (const [id] of [...enemyMeshes])      removeEnemy(id);
   }
 }
 
@@ -2116,7 +2129,7 @@ function showScreen(name) {
   screenJoin.style.display     = name === 'join'     ? 'flex' : 'none';
   screenWaiting.style.display  = name === 'waiting'  ? 'flex' : 'none';
   screenGameover.style.display = name === 'gameover' ? 'flex' : 'none';
-  hudEl.style.display          = (name === 'hud' || name === 'shop') ? 'block' : 'none';
+  hudEl.style.display          = name === 'hud' ? 'block' : 'none';
   const shopScreen = document.getElementById('shop-screen');
   if (shopScreen) shopScreen.style.display = name === 'shop' ? 'flex' : 'none';
   // Hide cursor during gameplay (not shop/gameover)
@@ -2219,6 +2232,8 @@ updateSettingsUI();
 const screenLoading = document.getElementById('screen-loading');
 const screenFade = document.getElementById('screen-fade');
 let loadingHidden = false;
+const LOAD_START = Date.now();
+const MIN_LOAD_MS = 2000;
 
 // Dots animation
 const loaderDots = document.getElementById('loader-dots');
@@ -2230,12 +2245,17 @@ const dotsInterval = setInterval(() => {
 
 function hideLoadingScreen() {
   if (loadingHidden) return;
-  loadingHidden = true;
-  clearInterval(dotsInterval);
-  if (screenLoading) {
-    screenLoading.classList.add('fade-out');
-    setTimeout(() => screenLoading.classList.add('hidden'), 750);
-  }
+  const elapsed = Date.now() - LOAD_START;
+  const remaining = Math.max(0, MIN_LOAD_MS - elapsed);
+  setTimeout(() => {
+    if (loadingHidden) return;
+    loadingHidden = true;
+    clearInterval(dotsInterval);
+    if (screenLoading) {
+      screenLoading.classList.add('fade-out');
+      setTimeout(() => screenLoading.classList.add('hidden'), 750);
+    }
+  }, remaining);
 }
 
 function fadeTransition(callback) {
@@ -2329,7 +2349,6 @@ function connect() {
     }
 
     if (msg.type === 'shop_open') {
-      waveClearActive = false;
       fadeTransition(() => {
         showScreen('shop');
         renderShop(msg.items, msg.balance, msg.wave, msg.rerollCost, msg.shipStats, msg.waveStats);
@@ -2562,16 +2581,15 @@ function animate(now) {
       updatePlayerMesh(snap, alpha);
     }
 
-    if (waveClearActive) {
-      // During wave clear: animate entities outward instead of updating from snapshot
-      updateWaveClear(dt);
-    } else {
-      for (const snap of currSnapshot.asteroids) updateAsteroidMesh(snap, alpha);
-      for (const snap of (currSnapshot.pickups || []))  updatePickupMesh(snap);
+    const isIntermission = currSnapshot.wavePhase === 'intermission';
+    for (const snap of currSnapshot.asteroids) updateAsteroidMesh(snap, alpha);
+    for (const snap of (currSnapshot.pickups || []))  updatePickupMesh(snap);
+    if (!isIntermission) {
       for (const snap of (currSnapshot.projectiles || [])) updateProjectileMesh(snap, dt);
       for (const snap of (currSnapshot.enemies || []))  updateEnemyMesh(snap, alpha);
       updateBossMesh(currSnapshot.boss, alpha);
     }
+
 
     updateHUD(currSnapshot);
     updateInventory(currSnapshot);
@@ -2584,9 +2602,17 @@ function animate(now) {
     for (const flash of window._flashPool) {
       if (flash.userData.life > 0) {
         flash.userData.life -= dt;
-        const t = flash.userData.life / 0.4;
-        flash.scale.set(5 + (1 - t) * 115, 5 + (1 - t) * 115, 1);
-        flash.material.opacity = t * 0.8;
+        const maxLife = flash.userData.expand ? 0.6 : 0.3;
+        const t = Math.max(0, flash.userData.life / maxLife);
+        if (flash.userData.expand) {
+          // Expanding shockwave ring
+          const s = 5 + (1 - t) * 140;
+          flash.scale.set(s, s, 1);
+          flash.material.opacity = t * 0.9;
+        } else {
+          // Static flash, just fade
+          flash.material.opacity = t * 0.9;
+        }
         if (flash.userData.life <= 0) flash.visible = false;
       }
     }
