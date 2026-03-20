@@ -138,6 +138,20 @@
       "score": 3450,
       "date": 1773746774367,
       "version": "v0.4.0"
+    },
+    {
+      "name": "qdz",
+      "score": 475,
+      "date": 1774029925922,
+      "version": "v0.5.0"
+    }
+  ],
+  "easy_wave10": [
+    {
+      "name": "eol",
+      "score": 265,
+      "date": 1774030026828,
+      "version": "v0.5.0"
     }
   ]
 }

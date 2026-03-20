@@ -1344,6 +1344,76 @@ function removeProjectile(id) {
 
 // Screen shake
 let shakeIntensity = 0;
+
+// ─── Wave clear animation ─────────────────────────────────────────────────────
+let waveClearActive = false;
+let waveClearStart = 0;
+const WAVE_CLEAR_DURATION = 1200; // ms
+
+function startWaveClearAnimation() {
+  waveClearActive = true;
+  waveClearStart = performance.now();
+  // Snapshot velocities for outward drift
+  for (const [, obj] of asteroidMeshes) {
+    const dx = obj.mesh.position.x, dy = obj.mesh.position.y;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    obj.mesh.userData.clearVx = (dx / len) * 180;
+    obj.mesh.userData.clearVy = (dy / len) * 180;
+  }
+  for (const [, obj] of pickupMeshes) {
+    const dx = obj.position.x, dy = obj.position.y;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    obj.userData.clearVx = (dx / len) * 220;
+    obj.userData.clearVy = (dy / len) * 220;
+  }
+  for (const [, obj] of projectileMeshes) {
+    obj.userData.clearVx = (Math.random() - 0.5) * 400;
+    obj.userData.clearVy = (Math.random() - 0.5) * 400;
+  }
+  for (const [, obj] of enemyMeshes) {
+    const dx = obj.group.position.x, dy = obj.group.position.y;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    obj.group.userData.clearVx = (dx / len) * 200;
+    obj.group.userData.clearVy = (dy / len) * 200;
+  }
+}
+
+function updateWaveClear(dt) {
+  if (!waveClearActive) return;
+  const elapsed = performance.now() - waveClearStart;
+  const t = Math.min(elapsed / WAVE_CLEAR_DURATION, 1);
+  const opacity = Math.max(0, 1 - t * 1.8);
+
+  for (const [, obj] of asteroidMeshes) {
+    const vx = obj.mesh.userData.clearVx || 0, vy = obj.mesh.userData.clearVy || 0;
+    obj.mesh.position.x += vx * dt;
+    obj.mesh.position.y += vy * dt;
+    obj.mesh.traverse(child => { if (child.material) { child.material.transparent = true; child.material.opacity = opacity; } });
+  }
+  for (const [, obj] of pickupMeshes) {
+    obj.position.x += (obj.userData.clearVx || 0) * dt;
+    obj.position.y += (obj.userData.clearVy || 0) * dt;
+    obj.traverse(child => { if (child.material) { child.material.transparent = true; child.material.opacity = opacity; } });
+  }
+  for (const [, obj] of projectileMeshes) {
+    obj.position.x += (obj.userData.clearVx || 0) * dt;
+    obj.position.y += (obj.userData.clearVy || 0) * dt;
+    if (obj.material) { obj.material.transparent = true; obj.material.opacity = opacity; }
+  }
+  for (const [, obj] of enemyMeshes) {
+    obj.group.position.x += (obj.group.userData.clearVx || 0) * dt;
+    obj.group.position.y += (obj.group.userData.clearVy || 0) * dt;
+    obj.group.traverse(child => { if (child.material) { child.material.transparent = true; child.material.opacity = opacity; } });
+  }
+
+  if (t >= 1) {
+    waveClearActive = false;
+    for (const [id] of [...asteroidMeshes]) removeAsteroid(id);
+    for (const [id] of [...pickupMeshes]) removePickup(id);
+    for (const [id] of [...projectileMeshes]) removeProjectile(id);
+    for (const [id] of [...enemyMeshes]) removeEnemy(id);
+  }
+}
 function triggerShake(power) { shakeIntensity = Math.max(shakeIntensity, power); }
 
 function updateLasers(dt) {
@@ -1379,6 +1449,15 @@ window.addEventListener('keydown', e => {
   if (map.right.includes(e.code)) keys.right  = true;
   if (map.shoot.includes(e.code)) { keys.shoot = true; e.preventDefault(); }
   if (e.code === 'Escape') toggleSettings();
+  // Weapon select keys 1-5
+  if (e.key >= '1' && e.key <= '5') {
+    const idx = parseInt(e.key) - 1;
+    if (idx < ALL_WEAPONS.length) {
+      const w = ALL_WEAPONS[idx];
+      const me = currSnapshot?.players.find(p => p.id === myId);
+      if (w.id === 'bullet' || (me && me[w.id] > 0)) selectedWeapon = w.id;
+    }
+  }
 });
 
 window.addEventListener('keyup', e => {
@@ -1589,37 +1668,43 @@ let selectedWeapon = 'bullet';
 const inventoryBar = document.getElementById('inventory-bar');
 const activeBuffs  = document.getElementById('active-buffs');
 
+const ALL_WEAPONS = [
+  { id: 'bullet',  icon: '•',  label: 'BASE',    color: '#00ffff', bg: 'rgba(0,255,255,0.06)' },
+  { id: 'trishot', icon: '🔱', label: 'TRIDENT', color: '#4488ff', bg: 'rgba(68,136,255,0.1)' },
+  { id: 'minigun', icon: '🔫', label: 'MINIGUN', color: '#ff4444', bg: 'rgba(255,68,68,0.1)' },
+  { id: 'laser',   icon: '⚡', label: 'LASER',   color: '#4488ff', bg: 'rgba(68,136,255,0.1)' },
+  { id: 'missile', icon: '🚀', label: 'MISSILE', color: '#ff2266', bg: 'rgba(255,34,102,0.1)' },
+];
+
 function updateInventory(snap) {
   if (!snap) return;
   const me = snap.players.find(p => p.id === myId);
   if (!me) return;
 
-  // Build slots dynamiquement — toutes les armes montrent leur ammo
-  const weapons = [{ id: 'bullet', icon: '•', label: 'BULLET', available: true }];
-  if (me.trishot) weapons.push({ id: 'trishot', icon: '🔱', label: 'TRISHOT', available: true, ammo: me.trishot, color: '#4488ff' });
-  if (me.minigun) weapons.push({ id: 'minigun', icon: '🔫', label: 'MINIGUN', available: true, ammo: me.minigun, color: '#ff4444' });
-  if (me.laser) weapons.push({ id: 'laser', icon: '⚡', label: 'LASER', available: true, ammo: me.laser });
-  if (me.missile) weapons.push({ id: 'missile', icon: '🚀', label: 'MISSILE', available: true, ammo: me.missile });
+  // Ammo lookup
+  const ammoMap = { trishot: me.trishot || 0, minigun: me.minigun || 0, laser: me.laser || 0, missile: me.missile || 0 };
 
-  // Si l'arme sélectionnée n'est plus disponible, fallback
-  if (!weapons.find(w => w.id === selectedWeapon)) selectedWeapon = 'bullet';
+  // Fallback si arme selectionnee n'a plus de munitions
+  if (selectedWeapon !== 'bullet' && (ammoMap[selectedWeapon] || 0) <= 0) selectedWeapon = 'bullet';
 
-  inventoryBar.innerHTML = weapons.map(w => {
+  inventoryBar.innerHTML = ALL_WEAPONS.map((w, i) => {
     const active = w.id === selectedWeapon ? ' active' : '';
-    const color = w.color || (w.id === 'laser' ? '#4488ff' : w.id === 'missile' ? '#ff2266' : '#00ffff');
-    let extra = '';
-    if (w.ammo !== undefined) extra = `<div class="inv-ammo" style="color:${color}">×${w.ammo}</div>`;
-    return `<div class="inv-slot${active}" data-weapon="${w.id}" style="border-color:${active ? color : ''}">
-      <div class="inv-icon" style="color:${color}">${w.icon}</div>
+    const ammo = w.id === 'bullet' ? null : ammoMap[w.id];
+    const empty = (ammo !== null && ammo <= 0) ? ' empty' : '';
+    const ammoHtml = ammo !== null ? `<div class="inv-ammo" style="color:${w.color}">x${ammo}</div>` : '';
+    return `<div class="inv-slot${active}${empty}" data-weapon="${w.id}" style="background:${w.bg}${active ? ';border-color:' + w.color : ''}">
+      <div class="inv-key">${i + 1}</div>
+      <div class="inv-icon" style="color:${w.color}">${w.icon}</div>
       <div class="inv-label">${w.label}</div>
-      ${extra}
+      ${ammoHtml}
     </div>`;
   }).join('');
 
   // Click sur slot
   for (const slot of inventoryBar.children) {
     slot.addEventListener('click', () => {
-      selectedWeapon = slot.dataset.weapon;
+      const wid = slot.dataset.weapon;
+      if (wid === 'bullet' || (ammoMap[wid] || 0) > 0) selectedWeapon = wid;
     });
   }
 
@@ -1722,10 +1807,30 @@ function handleEvent(msg) {
   }
 
   if (msg.type === 'missile_hit') {
-    spawnExplosion(msg.x, msg.y, 90, 0xff2266);
-    spawnExplosion(msg.x, msg.y, 45, 0xffaa00);
+    spawnExplosion(msg.x, msg.y, 130, 0xff2266);
+    spawnExplosion(msg.x, msg.y, 70, 0xffaa00);
+    spawnExplosion(msg.x, msg.y, 50, 0xffffff);
     playSound('explode');
-    triggerShake(6);
+    triggerShake(10);
+    // Flash circle
+    if (!window._flashPool) {
+      window._flashPool = [];
+      for (let i = 0; i < 4; i++) {
+        const geo = new THREE.CircleGeometry(1, 32);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.visible = false;
+        scene.add(mesh);
+        window._flashPool.push(mesh);
+      }
+      window._flashIdx = 0;
+    }
+    const flash = window._flashPool[window._flashIdx++ % window._flashPool.length];
+    flash.position.set(msg.x, msg.y, 2);
+    flash.scale.set(5, 5, 1);
+    flash.material.opacity = 0.8;
+    flash.visible = true;
+    flash.userData.life = 0.4;
   }
 
   if (msg.type === 'player_hit') {
@@ -1849,6 +1954,7 @@ function handleEvent(msg) {
 
   if (msg.type === 'wave_complete') {
     showAnnouncement(`WAVE ${msg.wave} COMPLETE!`, '#00ff88');
+    startWaveClearAnimation();
   }
 }
 
@@ -1857,7 +1963,7 @@ let shopItems = [];
 let shopBalance = 0;
 let shopRerollCost = 25;
 
-function renderShop(items, balance, wave, rerollCost) {
+function renderShop(items, balance, wave, rerollCost, shipStats, waveStats) {
   shopItems = items;
   shopBalance = balance;
   if (rerollCost !== undefined) shopRerollCost = rerollCost;
@@ -1867,9 +1973,37 @@ function renderShop(items, balance, wave, rerollCost) {
   const gridEl = document.getElementById('shop-grid');
   const readyBtn = document.getElementById('shop-ready-btn');
   const rerollBtn = document.getElementById('shop-reroll-btn');
+  const statsEl = document.getElementById('shop-stats');
 
   titleEl.textContent = `VAGUE ${wave} TERMINÉE`;
   balanceEl.textContent = `${balance} 💎`;
+
+  // Stats panels
+  if (statsEl && shipStats && waveStats) {
+    const speedPct = Math.round((shipStats.speedMult - 1) * 100);
+    const ratePct = Math.round((shipStats.fireRateMult - 1) * 100);
+    const weapons = [];
+    if (shipStats.trishot > 0) weapons.push(`🔱 ×${shipStats.trishot}`);
+    if (shipStats.minigun > 0) weapons.push(`🔫 ×${shipStats.minigun}`);
+    if (shipStats.laser > 0) weapons.push(`⚡ ×${shipStats.laser}`);
+    if (shipStats.missile > 0) weapons.push(`🚀 ×${shipStats.missile}`);
+
+    statsEl.innerHTML = `
+      <div class="shop-stat-panel">
+        <div class="stat-panel-title">🚀 VAISSEAU</div>
+        <div class="stat-row"><span class="stat-label">PV</span><span class="stat-val">${shipStats.hp}/${shipStats.maxHp} ❤️ · Vies: ${shipStats.lives}</span></div>
+        <div class="stat-row"><span class="stat-label">VITESSE</span><span class="stat-val">${speedPct >= 0 ? '+' : ''}${speedPct}%</span></div>
+        <div class="stat-row"><span class="stat-label">CADENCE</span><span class="stat-val">${ratePct >= 0 ? '+' : ''}${ratePct}%</span></div>
+        ${weapons.length ? `<div class="stat-row"><span class="stat-label">ARMES</span><span class="stat-val">${weapons.join(' ')}</span></div>` : ''}
+      </div>
+      <div class="shop-stat-panel">
+        <div class="stat-panel-title">⭐ VAGUE ${wave}</div>
+        <div class="stat-row"><span class="stat-label">SCORE</span><span class="stat-val stat-highlight">+${waveStats.score}</span></div>
+        <div class="stat-row"><span class="stat-label">CRISTAUX</span><span class="stat-val stat-crystals">+${waveStats.crystals} 💎</span></div>
+        <div class="stat-row"><span class="stat-label">ASTÉROÏDES</span><span class="stat-val">☄️ ${waveStats.kills}</span></div>
+      </div>
+    `;
+  }
 
   gridEl.innerHTML = items.map(item => `
     <div class="shop-card ${item.bought ? 'bought' : ''} ${balance < item.price ? 'too-expensive' : ''}" data-slot="${item.slotId}">
@@ -2105,6 +2239,11 @@ function connect() {
       startInputLoop();
     }
 
+    if (msg.type === 'player_count') {
+      const el = document.getElementById('player-count');
+      if (el) el.textContent = msg.count + ' joueur' + (msg.count > 1 ? 's' : '') + ' en ligne';
+    }
+
     if (msg.type === 'lobby_update') {
       myRoomCode = msg.code;
       roomCodeVal.textContent = msg.code;
@@ -2144,8 +2283,9 @@ function connect() {
     }
 
     if (msg.type === 'shop_open') {
+      waveClearActive = false;
       showScreen('shop');
-      renderShop(msg.items, msg.balance, msg.wave, msg.rerollCost);
+      renderShop(msg.items, msg.balance, msg.wave, msg.rerollCost, msg.shipStats, msg.waveStats);
     }
 
     if (msg.type === 'buy_confirm') {
@@ -2374,11 +2514,16 @@ function animate(now) {
       updatePlayerMesh(snap, alpha);
     }
 
-    for (const snap of currSnapshot.asteroids) updateAsteroidMesh(snap, alpha);
-    for (const snap of (currSnapshot.pickups || []))  updatePickupMesh(snap);
-    for (const snap of (currSnapshot.projectiles || [])) updateProjectileMesh(snap, dt);
-    for (const snap of (currSnapshot.enemies || []))  updateEnemyMesh(snap, alpha);
-    updateBossMesh(currSnapshot.boss, alpha);
+    if (waveClearActive) {
+      // During wave clear: animate entities outward instead of updating from snapshot
+      updateWaveClear(dt);
+    } else {
+      for (const snap of currSnapshot.asteroids) updateAsteroidMesh(snap, alpha);
+      for (const snap of (currSnapshot.pickups || []))  updatePickupMesh(snap);
+      for (const snap of (currSnapshot.projectiles || [])) updateProjectileMesh(snap, dt);
+      for (const snap of (currSnapshot.enemies || []))  updateEnemyMesh(snap, alpha);
+      updateBossMesh(currSnapshot.boss, alpha);
+    }
 
     updateHUD(currSnapshot);
     updateInventory(currSnapshot);
@@ -2386,6 +2531,18 @@ function animate(now) {
 
   updateParticles(dt);
   updateLasers(dt);
+  // Update missile flash circles
+  if (window._flashPool) {
+    for (const flash of window._flashPool) {
+      if (flash.userData.life > 0) {
+        flash.userData.life -= dt;
+        const t = flash.userData.life / 0.4;
+        flash.scale.set(5 + (1 - t) * 115, 5 + (1 - t) * 115, 1);
+        flash.material.opacity = t * 0.8;
+        if (flash.userData.life <= 0) flash.visible = false;
+      }
+    }
+  }
   updateStormWarning();
   updateBorderArcs();
   // Flash border zap

@@ -59,7 +59,7 @@ const MISSILE_SPEED = 280;
 const BULLET_RADIUS = 3;
 const MISSILE_RADIUS = 8;
 const LASER_RANGE = 420;
-const MISSILE_AOE = 65;
+const MISSILE_AOE = 95;
 const KNOCKBACK_BULLET = 90;
 const KNOCKBACK_MISSILE = 200;
 const AST_BOUNCE = 0.7;
@@ -151,6 +151,15 @@ const DT = TICK_MS / 1000;
 let gameState = null;
 
 const rooms = new Map(); // code → Room
+const allWs = new Set(); // all connected websockets
+let fakeMinPlayers = Math.floor(Math.random() * 7) + 2; // 2-8
+setInterval(() => { fakeMinPlayers = Math.floor(Math.random() * 7) + 2; }, (180 + Math.random() * 120) * 1000);
+
+function broadcastPlayerCount() {
+  const count = Math.max(allWs.size, fakeMinPlayers);
+  const msg = JSON.stringify({ type: 'player_count', count });
+  for (const ws of allWs) { try { ws.send(msg); } catch {} }
+}
 
 function createRoomState() {
   return {
@@ -174,6 +183,7 @@ function createRoomState() {
     shopItems: new Map(),
     playersReady: new Set(),
     shopTimeout: 0,
+    spawnQueue: [],
     stormDir: 0,
   };
 }
@@ -262,6 +272,9 @@ function createPlayer(id, name, index) {
     comboCount: 0,       // nombre de hits dans le combo actuel
     lastInputSeq: 0,     // dernier seq d'input traité (pour reconciliation)
     crystals: 0,          // monnaie shop (séparée du score)
+    waveScore: 0,         // score gagné cette vague (pour stats shop)
+    waveCrystals: 0,      // cristaux gagnés cette vague
+    waveKills: 0,         // astéroïdes détruits cette vague
     maxHp: 4,
     speedMult: 1,
     fireRateMult: 1,
@@ -467,6 +480,9 @@ function hitAsteroid(a, p, events, forceDestroy = false, impactVx, impactVy) {
     if (scorer) {
       scorer.score += a.crystalValue;
       scorer.crystals += Math.floor(a.crystalValue / 5);
+      scorer.waveScore += a.crystalValue;
+      scorer.waveCrystals += Math.floor(a.crystalValue / 5);
+      scorer.waveKills++;
     }
     events.push({
       type: 'asteroid_destroyed',
@@ -533,35 +549,39 @@ function processShots(events) {
       p.prevShoot = p.shoot;
       continue;
     }
-    const shoot = p.shoot && !p.prevShoot && p.shootCooldown === 0;
+    // Arme sélectionnée par le joueur (scroll inventaire), fallback bullet si pas d'ammo
+    let weaponType = p.selectedWeapon || 'bullet';
+    if (weaponType === 'trishot' && p.effects.trishot <= 0) weaponType = 'bullet';
+    if (weaponType === 'laser' && p.effects.laser <= 0) weaponType = 'bullet';
+    if (weaponType === 'missile' && p.effects.missile <= 0) weaponType = 'bullet';
+
+    // Bullet & trishot = auto-fire (maintenir clic), autres armes = semi-auto (clic par clic)
+    const autoFire = (weaponType === 'bullet' || weaponType === 'trishot');
+    const shoot = autoFire
+      ? (p.shoot && p.shootCooldown === 0)
+      : (p.shoot && !p.prevShoot && p.shootCooldown === 0);
     p.prevShoot = p.shoot;
     if (!shoot) continue;
-
-    // Arme sélectionnée par le joueur (scroll inventaire), fallback bullet
-    let weaponType = 'bullet';
-    if (p.selectedWeapon === 'laser' && p.effects.laser > 0) weaponType = 'laser';
-    else if (p.selectedWeapon === 'missile' && p.effects.missile > 0) weaponType = 'missile';
 
     const baseCooldown = p.effects.rapid > 0 ? Math.ceil(SHOOT_COOLDOWN / 2) : SHOOT_COOLDOWN;
     p.shootCooldown = Math.ceil(baseCooldown / p.fireRateMult);
 
-    if (weaponType === 'bullet' || weaponType === 'missile') {
-      if (weaponType === 'missile') p.effects.missile--;
-      // Triple-shot : 3 balles en éventail, consomme 1 ammo
-      if (weaponType === 'bullet' && p.effects.trishot > 0) {
-        p.effects.trishot--;
-        for (const offset of [-0.26, 0, 0.26]) { // ±15°
-          const proj = createProjectile(p, 'bullet');
-          const cos = Math.cos(offset), sin = Math.sin(offset);
-          const ovx = proj.vx, ovy = proj.vy;
-          proj.vx = ovx * cos - ovy * sin;
-          proj.vy = ovx * sin + ovy * cos;
-          gameState.projectiles.set(proj.id, proj);
-        }
-      } else {
-        const proj = createProjectile(p, weaponType);
+    if (weaponType === 'trishot') {
+      // Triple-shot : 3 balles en éventail, arme distincte
+      p.effects.trishot--;
+      for (const offset of [-0.26, 0, 0.26]) { // ±15°
+        const proj = createProjectile(p, 'bullet');
+        const cos = Math.cos(offset), sin = Math.sin(offset);
+        const ovx = proj.vx, ovy = proj.vy;
+        proj.vx = ovx * cos - ovy * sin;
+        proj.vy = ovx * sin + ovy * cos;
         gameState.projectiles.set(proj.id, proj);
       }
+      events.push({ type: 'shot_fired', playerId: p.id, weaponType: 'trishot' });
+    } else if (weaponType === 'bullet' || weaponType === 'missile') {
+      if (weaponType === 'missile') p.effects.missile--;
+      const proj = createProjectile(p, weaponType);
+      gameState.projectiles.set(proj.id, proj);
       events.push({ type: 'shot_fired', playerId: p.id, weaponType });
     }
 
@@ -1292,7 +1312,14 @@ function openShop(room) {
     if (!p) continue;
     const items = gameState.shopItems.get(p.id) || [];
     const rerollCost = REROLL_BASE_COST * (p.rerollCount + 1);
-    ws.send(JSON.stringify({ type: 'shop_open', items, balance: p.crystals, wave: gameState.wave, rerollCost }));
+    const shipStats = {
+      hp: p.hp, maxHp: p.maxHp, lives: p.lives,
+      speedMult: p.speedMult, fireRateMult: p.fireRateMult,
+      laser: p.effects.laser, missile: p.effects.missile,
+      trishot: p.effects.trishot, minigun: p.effects.minigun,
+    };
+    const waveStats = { score: p.waveScore, crystals: p.waveCrystals, kills: p.waveKills };
+    ws.send(JSON.stringify({ type: 'shop_open', items, balance: p.crystals, wave: gameState.wave, rerollCost, shipStats, waveStats }));
   }
 }
 
@@ -1342,11 +1369,11 @@ function startNextWave(room) {
   gameState.projectiles.clear();
   gameState.enemies.clear();
 
-  // Spawn initial asteroids (scales with wave)
+  // Spawn initial asteroids gradually (staggered via queue)
+  gameState.spawnQueue = [];
   const initAst = Math.min(5 + gameState.wave, 12);
   for (let i = 0; i < initAst; i++) {
-    const a = spawnAsteroid();
-    gameState.asteroids.set(a.id, a);
+    gameState.spawnQueue.push({ delay: i * 2 }); // 1 every 2 ticks = ~0.6s total
   }
 
   // Spawn enemies based on wave + difficulty
@@ -1368,14 +1395,16 @@ function startNextWave(room) {
       p.y = Math.sin(angle) * 150;
       p.vx = 0; p.vy = 0;
     }
+    // Reset wave stats
+    p.waveScore = 0; p.waveCrystals = 0; p.waveKills = 0;
     // Apply shop drone
     if (p.shopDrone) {
       p.effects.drone = cfg.waveSec * 20 + 100; // full wave + buffer
       p.shopDrone = false;
     }
-    // Apply shop nuke (delayed by a few ticks so players see it)
-    if (p.shopNuke) {
-      p.shopNuke = 'pending';
+    // Apply shop nuke (delayed 2s so asteroids have time to spawn)
+    if (p.shopNuke === true) {
+      p.shopNuke = 40; // 40 ticks = 2 seconds countdown
     }
     // Reset auto-heal timer
     p.autoHealTimer = 0;
@@ -1453,24 +1482,36 @@ function gameTick(room) {
     checkPlayerPickupCollisions(events);
 
     if (wp === 'fighting') {
+      // Process spawn queue (gradual asteroid spawning)
+      let spawned = 0;
+      while (gameState.spawnQueue.length > 0 && spawned < 2) {
+        const item = gameState.spawnQueue[0];
+        if (item.delay > 0) { item.delay--; break; }
+        gameState.spawnQueue.shift();
+        const a = spawnAsteroid();
+        gameState.asteroids.set(a.id, a);
+        spawned++;
+      }
       maintainAsteroids();
 
       // Enemies
       for (const e of gameState.enemies.values()) integrateEnemy(e, events);
       checkEnemyPlayerCollisions(events);
 
-      // Nuke from shop (first tick of wave)
+      // Nuke from shop (countdown, detonates after 2s)
       for (const p of gameState.players.values()) {
-        if (p.shopNuke === 'pending') {
-          p.shopNuke = false;
-          // Destroy all asteroids
-          for (const a of gameState.asteroids.values()) {
-            events.push({ type: 'asteroid_destroyed', x: a.x, y: a.y, radius: a.radius, playerId: p.id, crystals: a.crystalValue });
-            p.score += a.crystalValue;
-            p.crystals += Math.floor(a.crystalValue / 5);
+        if (typeof p.shopNuke === 'number' && p.shopNuke > 0) {
+          p.shopNuke--;
+          if (p.shopNuke === 0) {
+            // Destroy all asteroids
+            for (const a of gameState.asteroids.values()) {
+              events.push({ type: 'asteroid_destroyed', x: a.x, y: a.y, radius: a.radius, playerId: p.id, crystals: a.crystalValue });
+              p.score += a.crystalValue;
+              p.crystals += Math.floor(a.crystalValue / 5);
+            }
+            gameState.asteroids.clear();
+            events.push({ type: 'nuke_activated', x: 0, y: 0, playerId: p.id });
           }
-          gameState.asteroids.clear();
-          events.push({ type: 'nuke_activated', x: 0, y: 0, playerId: p.id });
         }
       }
 
@@ -1701,7 +1742,8 @@ function endGame(room, reason) {
   }
   broadcastRoom(room, { type: 'gameover', scores, reason: reason || 'time' });
   console.log(`🏆 [${room.code}] Fin (${reason}) :`, scores.map(s => `${s.name}:${s.score}`).join(', '));
-  setTimeout(() => withRoom(room, () => resetLobby(room)), 8000);
+  if (room.resetLobbyTimer) clearTimeout(room.resetLobbyTimer);
+  room.resetLobbyTimer = setTimeout(() => withRoom(room, () => resetLobby(room)), 8000);
 }
 
 function resetLobby(room) {
@@ -1750,7 +1792,10 @@ Bun.serve({
     return new Response(file, { headers: { 'Content-Type': contentType } });
   },
   websocket: {
-    open(ws) {},
+    open(ws) {
+      allWs.add(ws);
+      broadcastPlayerCount();
+    },
 
     message(ws, rawMsg) {
       let msg;
@@ -1824,6 +1869,8 @@ Bun.serve({
         if (!room) return;
         if (ws.playerId !== room.hostId) return;
         if (room.gameState.phase !== 'lobby') return;
+        // Cancel any pending lobby reset timer (prevents reset mid-game after quick restart)
+        if (room.resetLobbyTimer) { clearTimeout(room.resetLobbyTimer); room.resetLobbyTimer = null; }
         withRoom(room, () => startGame(room, { difficulty: msg.difficulty }));
       }
 
@@ -1935,6 +1982,8 @@ Bun.serve({
     },
 
     close(ws) {
+      allWs.delete(ws);
+      broadcastPlayerCount();
       const room = ws.room;
       if (!room) return;
 

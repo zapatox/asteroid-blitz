@@ -370,6 +370,17 @@ body::after {
   flex-wrap: wrap;
 }
 
+/* ── Player Count ──────────────────────────────────────── */
+.player-count {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.6rem;
+  color: #00ff88;
+  text-align: center;
+  margin-top: 8px;
+  text-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+  letter-spacing: 1px;
+}
+
 /* ── Version / Changelog ─────────────────────────────── */
 #version-box {
   margin-top: 14px;
@@ -926,21 +937,22 @@ button:active { transform: scale(0.97); }
 
 #inventory-bar {
   position: absolute;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  gap: 8px;
   pointer-events: all;
   z-index: 42;
 }
 
 .inv-slot {
-  width: 48px;
-  height: 48px;
-  background: rgba(0, 8, 28, 0.85);
-  border: 1px solid rgba(0, 255, 255, 0.2);
+  width: 64px;
+  height: 72px;
+  background: rgba(0, 8, 28, 0.9);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -948,44 +960,64 @@ button:active { transform: scale(0.97); }
   cursor: pointer;
   transition: all 0.15s;
   position: relative;
+  padding: 4px;
 }
 
 .inv-slot.active {
   border-color: var(--cyan);
-  box-shadow: 0 0 10px rgba(0, 255, 255, 0.4), inset 0 0 8px rgba(0, 255, 255, 0.1);
+  box-shadow: 0 0 14px rgba(0, 255, 255, 0.5), inset 0 0 10px rgba(0, 255, 255, 0.15);
+  animation: weapon-pulse 1.5s infinite ease-in-out;
 }
 
-.inv-slot.disabled {
-  opacity: 0.3;
+@keyframes weapon-pulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(0, 255, 255, 0.5), inset 0 0 10px rgba(0, 255, 255, 0.15); }
+  50% { box-shadow: 0 0 20px rgba(0, 255, 255, 0.7), inset 0 0 14px rgba(0, 255, 255, 0.25); }
+}
+
+.inv-slot.empty {
+  opacity: 0.25;
+  border-style: dashed;
   pointer-events: none;
 }
 
-.inv-slot:hover:not(.disabled) {
+.inv-slot:hover:not(.empty) {
   border-color: var(--cyan);
   background: rgba(0, 255, 255, 0.08);
 }
 
 .inv-icon {
-  font-size: 1.2rem;
+  font-size: 1.6rem;
   line-height: 1;
 }
 
 .inv-label {
   font-family: 'Press Start 2P', monospace;
-  font-size: 0.35rem;
-  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.4rem;
+  color: rgba(255, 255, 255, 0.6);
   letter-spacing: 0.5px;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .inv-slot.active .inv-label { color: var(--cyan); }
 
+.inv-key {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-family: 'Orbitron', monospace;
+  font-size: 0.5rem;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.inv-slot.active .inv-key { color: var(--cyan); }
+
 .inv-ammo {
   position: absolute;
-  bottom: 2px;
-  right: 3px;
-  font-family: 'Press Start 2P', monospace;
-  font-size: 0.45rem;
+  top: 2px;
+  right: 4px;
+  font-family: 'Orbitron', monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
   color: var(--cyan);
 }
 
@@ -1214,9 +1246,63 @@ button:active { transform: scale(0.97); }
   font-family: 'Press Start 2P', monospace;
   color: var(--cyan);
   font-size: 1rem;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   text-shadow: 0 0 10px var(--cyan);
 }
+
+.shop-stats {
+  display: flex;
+  gap: 14px;
+  max-width: 700px;
+  margin: 0 auto 14px;
+  width: 100%;
+}
+
+.shop-stat-panel {
+  flex: 1;
+  background: rgba(0, 10, 30, 0.85);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+.stat-panel-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 0.6rem;
+  color: var(--cyan);
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(0, 255, 255, 0.15);
+  padding-bottom: 6px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.stat-label {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.38rem;
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.stat-val {
+  font-family: 'Orbitron', monospace;
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.85);
+  text-align: right;
+}
+
+.stat-highlight { color: #ffdd44; }
+.stat-crystals { color: var(--cyan); }
+
 .shop-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
