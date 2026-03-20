@@ -969,6 +969,7 @@ function applyMagnet() {
 function integrateMinigun(events) {
   for (const p of gameState.players.values()) {
     if (!p.alive || p.respawnTimer > 0 || p.effects.minigun <= 0) continue;
+    if (p.selectedWeapon !== 'minigun') continue; // seulement si arme minigun sélectionnée
     if (!p.shoot) continue; // tire seulement quand le joueur appuie
     // Tire toutes les 2 ticks (~10 balles/sec) avec spread aléatoire
     if (gameState.tick % 2 === 0) {

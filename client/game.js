@@ -1455,7 +1455,7 @@ window.addEventListener('keydown', e => {
     if (idx < ALL_WEAPONS.length) {
       const w = ALL_WEAPONS[idx];
       const me = currSnapshot?.players.find(p => p.id === myId);
-      if (w.id === 'bullet' || (me && me[w.id] > 0)) selectedWeapon = w.id;
+      if (w.id === 'bullet' || (me && me[w.id] > 0)) selectWeapon(w.id, true);
     }
   }
 });
@@ -1665,8 +1665,18 @@ function showAnnouncement(text, color) {
 // ─── Inventaire & switch d'arme ───────────────────────────────────────────────
 
 let selectedWeapon = 'bullet';
+let weaponPopId = null;
+let weaponPopTime = 0;
 const inventoryBar = document.getElementById('inventory-bar');
 const activeBuffs  = document.getElementById('active-buffs');
+
+function selectWeapon(id, hasAmmo) {
+  if (!hasAmmo && id !== 'bullet') return;
+  if (id === selectedWeapon) return;
+  selectedWeapon = id;
+  weaponPopId = id;
+  weaponPopTime = performance.now();
+}
 
 const ALL_WEAPONS = [
   { id: 'bullet',  icon: '•',  label: 'BASE',    color: '#00ffff', bg: 'rgba(0,255,255,0.06)' },
@@ -1687,12 +1697,14 @@ function updateInventory(snap) {
   // Fallback si arme selectionnee n'a plus de munitions
   if (selectedWeapon !== 'bullet' && (ammoMap[selectedWeapon] || 0) <= 0) selectedWeapon = 'bullet';
 
+  const nowMs = performance.now();
   inventoryBar.innerHTML = ALL_WEAPONS.map((w, i) => {
     const active = w.id === selectedWeapon ? ' active' : '';
     const ammo = w.id === 'bullet' ? null : ammoMap[w.id];
     const empty = (ammo !== null && ammo <= 0) ? ' empty' : '';
+    const pop = (w.id === weaponPopId && nowMs - weaponPopTime < 400) ? ' pop' : '';
     const ammoHtml = ammo !== null ? `<div class="inv-ammo" style="color:${w.color}">x${ammo}</div>` : '';
-    return `<div class="inv-slot${active}${empty}" data-weapon="${w.id}" style="background:${w.bg}${active ? ';border-color:' + w.color : ''}">
+    return `<div class="inv-slot${active}${empty}${pop}" data-weapon="${w.id}" style="background:${w.bg}${active ? ';border-color:' + w.color : ''}">
       <div class="inv-key">${i + 1}</div>
       <div class="inv-icon" style="color:${w.color}">${w.icon}</div>
       <div class="inv-label">${w.label}</div>
@@ -1704,7 +1716,7 @@ function updateInventory(snap) {
   for (const slot of inventoryBar.children) {
     slot.addEventListener('click', () => {
       const wid = slot.dataset.weapon;
-      if (wid === 'bullet' || (ammoMap[wid] || 0) > 0) selectedWeapon = wid;
+      selectWeapon(wid, wid === 'bullet' || (ammoMap[wid] || 0) > 0);
     });
   }
 
@@ -1741,11 +1753,10 @@ canvas.addEventListener('wheel', e => {
   if (me.laser) weapons.push('laser');
   if (me.missile) weapons.push('missile');
   const idx = weapons.indexOf(selectedWeapon);
-  if (e.deltaY > 0) {
-    selectedWeapon = weapons[(idx + 1) % weapons.length];
-  } else {
-    selectedWeapon = weapons[(idx - 1 + weapons.length) % weapons.length];
-  }
+  const nextId = e.deltaY > 0
+    ? weapons[(idx + 1) % weapons.length]
+    : weapons[(idx - 1 + weapons.length) % weapons.length];
+  selectWeapon(nextId, true);
 }, { passive: false });
 
 // ─── Pickup flash (animation bords d'écran) ───────────────────────────────────
@@ -2204,6 +2215,38 @@ document.getElementById('btn-settings').addEventListener('click', toggleSettings
 
 updateSettingsUI();
 
+// ─── Écran de chargement ─────────────────────────────────────────────────────
+const screenLoading = document.getElementById('screen-loading');
+const screenFade = document.getElementById('screen-fade');
+let loadingHidden = false;
+
+// Dots animation
+const loaderDots = document.getElementById('loader-dots');
+let dotsCount = 0;
+const dotsInterval = setInterval(() => {
+  dotsCount = (dotsCount + 1) % 4;
+  if (loaderDots) loaderDots.textContent = '.'.repeat(dotsCount);
+}, 400);
+
+function hideLoadingScreen() {
+  if (loadingHidden) return;
+  loadingHidden = true;
+  clearInterval(dotsInterval);
+  if (screenLoading) {
+    screenLoading.classList.add('fade-out');
+    setTimeout(() => screenLoading.classList.add('hidden'), 750);
+  }
+}
+
+function fadeTransition(callback) {
+  if (!screenFade) { callback(); return; }
+  screenFade.classList.add('active');
+  setTimeout(() => {
+    callback();
+    setTimeout(() => screenFade.classList.remove('active'), 50);
+  }, 420);
+}
+
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 
 let ws = null;
@@ -2212,7 +2255,10 @@ let inputSeq = 0;
 function connect() {
   ws = new WebSocket(WS_URL);
 
-  ws.onopen  = () => { lobbyInfo.textContent = 'Connecté ! Entre ton nom et crée ou rejoins une salle.'; };
+  ws.onopen  = () => {
+    lobbyInfo.textContent = 'Connecté ! Entre ton nom et crée ou rejoins une salle.';
+    hideLoadingScreen();
+  };
   ws.onerror = () => { lobbyInfo.textContent = 'Impossible de se connecter au serveur.'; };
   ws.onclose = () => {
     isHost = false; myRoomCode = null;
@@ -2284,8 +2330,10 @@ function connect() {
 
     if (msg.type === 'shop_open') {
       waveClearActive = false;
-      showScreen('shop');
-      renderShop(msg.items, msg.balance, msg.wave, msg.rerollCost, msg.shipStats, msg.waveStats);
+      fadeTransition(() => {
+        showScreen('shop');
+        renderShop(msg.items, msg.balance, msg.wave, msg.rerollCost, msg.shipStats, msg.waveStats);
+      });
     }
 
     if (msg.type === 'buy_confirm') {
