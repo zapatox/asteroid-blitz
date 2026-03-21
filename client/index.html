@@ -91,7 +91,7 @@
     </div>
     <div class="controls-hint">
       <span id="controls-hint-keys">ZQSD / Flèches</span>
-      <span>· ESPACE / CLIC — Tirer · CLIC DROIT — Dash · 1-5 / MOLETTE — Armes</span>
+      <span>· ESPACE / CLIC — Tirer · CLIC DROIT — Dash · 1-4 / MOLETTE — Armes · E — Échanger arme</span>
     </div>
     <div class="lobby-buttons" style="margin-top:6px">
       <button class="btn-settings-small" onclick="document.getElementById('settings-panel').style.display='flex'">⚙ Options</button>
@@ -101,10 +101,11 @@
     <div id="player-count" class="player-count"></div>
     <div id="version-box">
       <div id="version-header" onclick="document.getElementById('changelog').classList.toggle('open')">
-        <span id="version-tag">v0.6.1</span>
+        <span id="version-tag">v0.7.0</span>
         <span id="version-arrow">▼</span>
       </div>
       <div id="changelog">
+        <div class="cl-entry"><b>v0.7.0</b> — Sélection de vaisseau · Limite 4 armes · Écran d'amélioration · Swap d'armes · Achievements</div>
         <div class="cl-entry"><b>v0.6.1</b> — Map 16:9 · Laser pleine portée · Effets visuels améliorés · Shop fond opaque · Fix projectiles figés en fin de vague</div>
       </div>
     </div>
@@ -145,6 +146,8 @@
     <div id="room-code-display">CODE : <span id="room-code-val">----</span></div>
     <div id="waiting-players"></div>
 
+    <div id="ship-selector" class="ship-selector"></div>
+
     <!-- Settings host only -->
     <div id="host-settings" style="display:none">
       <div class="setting-group">
@@ -180,6 +183,14 @@
     <button id="shop-reroll-btn" class="btn-neon btn-reroll">🔄 REROLL — 25 💎</button>
     <div id="shop-ready-count" class="shop-ready-count"></div>
     <button id="shop-ready-btn" class="btn-neon btn-ready">PRÊT</button>
+  </div>
+
+  <!-- Upgrade screen -->
+  <div id="upgrade-screen" class="screen" style="display:none">
+    <h2 id="upgrade-title" class="upgrade-title">AMÉLIORATION D'ARME</h2>
+    <div id="upgrade-weapon-info" class="upgrade-weapon-info"></div>
+    <div id="upgrade-choices" class="upgrade-choices"></div>
+    <div id="upgrade-wait" class="upgrade-wait" style="display:none">En attente des autres joueurs...</div>
   </div>
 
   <!-- HUD en jeu -->
@@ -265,6 +276,9 @@
       <button id="btn-close-settings" class="btn-close">FERMER (ESC)</button>
     </div>
   </div>
+
+  <!-- Swap hint (non-intrusive) -->
+  <div id="swap-hint" style="display:none">INVENTAIRE PLEIN — Maintiens <kbd>E</kbd> pour échanger l'arme sélectionnée</div>
 
   <script type="module" src="game.js"></script>
 </body>

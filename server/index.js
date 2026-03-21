@@ -1,7 +1,7 @@
 // Asteroid Blitz — Serveur autoritaire Bun WebSockets (multi-salles)
 // Lancer : bun run server/index.js
 
-const GAME_VERSION = 'v0.6.1';
+const GAME_VERSION = 'v0.7.0';
 
 // Wave system
 const WAVE_CONFIG = {
@@ -141,9 +141,85 @@ const SHOP_POOL = [
   { id: 'nuke_start',   cat: 'active',  name: 'Nuke au départ',    price: 180, icon: '💥', desc: 'Nuke au début de la vague' },
   { id: 'double_dmg',   cat: 'buff',    name: 'Double dégâts',     price: 100, icon: '⚔️', desc: 'x2 dégâts prochaine vague' },
   { id: 'auto_heal',    cat: 'buff',    name: 'Auto-soin',         price: 80,  icon: '🩹', desc: '+1 PV toutes les 10s' },
+  { id: 'xp_boost',       cat: 'buff',    name: 'XP Boost',         price: 90,  icon: '📈', desc: 'x2 XP armes prochaine vague' },
+  { id: 'ammo_regen',     cat: 'passive', name: 'Recycleur',        price: 130, icon: '♻️', desc: '10% récup munition' },
+  { id: 'crystal_magnet', cat: 'passive', name: 'Aimant cristaux',  price: 70,  icon: '💎', desc: '+20% cristaux' },
+  { id: 'weapon_respec',  cat: 'active',  name: 'Respec arme',      price: 150, icon: '🔄', desc: 'Reset les upgrades d\'une arme' },
 ];
 
 const PLAYER_COLORS = ['#00ffff', '#ff00ff', '#ffff00', '#ff6600'];
+
+const SHIP_TYPES = [
+  {
+    id: 'viper', name: 'VIPER',
+    desc: 'Vaisseau standard. Équilibré.',
+    hp: 4, lives: 2, speedMult: 1, fireRateMult: 1,
+    startWeapons: ['bullet'],
+    dashCooldownMult: 1,
+    unlock: null,
+  },
+  {
+    id: 'phantom', name: 'PHANTOM',
+    desc: 'Rapide et agile, mais fragile.',
+    hp: 3, lives: 2, speedMult: 1.25, fireRateMult: 1.1,
+    startWeapons: ['bullet'],
+    dashCooldownMult: 0.6,
+    unlock: { type: 'score', value: 3000, label: 'Score ≥ 3000' },
+  },
+  {
+    id: 'titan', name: 'TITAN',
+    desc: 'Tank blindé. Lent mais résistant.',
+    hp: 6, lives: 3, speedMult: 0.8, fireRateMult: 0.85,
+    startWeapons: ['bullet'],
+    dashCooldownMult: 1.5,
+    unlock: { type: 'wave', value: 7, label: 'Atteindre vague 7' },
+  },
+  {
+    id: 'spectre', name: 'SPECTRE',
+    desc: 'Commence avec le laser. Offensif.',
+    hp: 3, lives: 2, speedMult: 1, fireRateMult: 1,
+    startWeapons: ['bullet', 'laser'],
+    startAmmo: { laser: 5 },
+    dashCooldownMult: 1,
+    unlock: { type: 'boss_kill', value: 1, label: 'Tuer un boss' },
+  },
+];
+
+const WEAPON_XP_THRESHOLDS = [50, 150, 350, 700];
+
+const WEAPON_UPGRADES = {
+  bullet: [
+    [{ id: 'rapid_bullet', name: 'Cadence+', desc: '+30% cadence de tir', icon: '⚡' }, { id: 'piercing', name: 'Perforant', desc: 'Traverse 1 astéroïde', icon: '🔩' }],
+    [{ id: 'double_shot', name: 'Double tir', desc: '2 balles parallèles', icon: '⟐' }, { id: 'heavy_bullet', name: 'Impact+', desc: '+50% knockback', icon: '💥' }],
+    [{ id: 'ricochet', name: 'Ricochet', desc: 'Rebond sur les murs', icon: '↩' }, { id: 'homing', name: 'Guidage', desc: 'Légère auto-visée', icon: '🎯' }],
+    [{ id: 'armor_pierce', name: 'Blindage+', desc: '+1 dégât par tir', icon: '⚔️' }, { id: 'bullet_storm', name: 'Tempête', desc: 'x3 cadence 2s / 10s', icon: '🌪️' }],
+  ],
+  trishot: [
+    [{ id: 'wider_spread', name: 'Éventail', desc: 'Arc +50%', icon: '↔' }, { id: 'tight_spread', name: 'Convergent', desc: 'Tirs focalisés', icon: '🎯' }],
+    [{ id: 'five_shot', name: '5 tirs', desc: '5 balles en arc', icon: '🖐️' }, { id: 'faster_tri', name: 'Vélocité', desc: '+40% vitesse', icon: '💨' }],
+    [{ id: 'explosive_tips', name: 'Explosif', desc: 'Mini AOE par balle', icon: '💥' }, { id: 'ammo_saver', name: 'Économe', desc: '20% chance gratuit', icon: '♻️' }],
+    [{ id: 'hail', name: 'Déluge', desc: '8 tirs en cercle', icon: '☄️' }, { id: 'pierce_tri', name: 'Perforant', desc: 'Traverse 1 ennemi', icon: '🔩' }],
+  ],
+  minigun: [
+    [{ id: 'fast_spin', name: 'Turbo', desc: '+25% cadence', icon: '⚡' }, { id: 'big_caliber', name: 'Calibre+', desc: '+50% dégâts', icon: '🔫' }],
+    [{ id: 'ammo_belt', name: 'Chargeur+', desc: '+30% efficacité', icon: '🎒' }, { id: 'tracer', name: 'Traceur', desc: '+knockback', icon: '✨' }],
+    [{ id: 'spinup', name: 'Spin-up', desc: 'Accélère progressivement', icon: '🔄' }, { id: 'wide_spray', name: 'Dispersion', desc: 'Couverture large', icon: '↔' }],
+    [{ id: 'gatling', name: 'Gatling', desc: 'Cadence folle, ralentit', icon: '🏋️' }, { id: 'explosive_rounds', name: 'Explosif', desc: '5% chance explosion', icon: '💥' }],
+  ],
+  laser: [
+    [{ id: 'wider_beam', name: 'Large', desc: '+hitbox du rayon', icon: '↔' }, { id: 'longer_range', name: 'Portée+', desc: '+30% portée', icon: '📏' }],
+    [{ id: 'chain_lightning', name: 'Chaîne', desc: 'Frappe 2 cibles proches', icon: '⚡' }, { id: 'sustained', name: 'Continu', desc: 'Maintenir = rayon continu', icon: '〰️' }],
+    [{ id: 'overcharge', name: 'Surcharge', desc: '+2 dégâts par hit', icon: '⚔️' }, { id: 'refraction', name: 'Réfraction', desc: 'Se divise en 2', icon: '🔀' }],
+    [{ id: 'plasma_lance', name: 'Lance plasma', desc: 'Dégâts massifs en ligne', icon: '🗡️' }, { id: 'tesla_coil', name: 'Tesla', desc: 'Auto-cible le plus proche', icon: '🎯' }],
+  ],
+  missile: [
+    [{ id: 'bigger_blast', name: 'Blast+', desc: '+40% AOE', icon: '💥' }, { id: 'fast_missile', name: 'Vélocité', desc: '+50% vitesse', icon: '💨' }],
+    [{ id: 'cluster', name: 'Cluster', desc: 'Éclate en 3 mini-missiles', icon: '🎆' }, { id: 'seeker', name: 'Guidé', desc: 'Poursuite auto', icon: '🎯' }],
+    [{ id: 'napalm', name: 'Napalm', desc: 'Zone de feu 3s', icon: '🔥' }, { id: 'emp', name: 'EMP', desc: 'Stun ennemis 2s', icon: '⚡' }],
+    [{ id: 'mirv', name: 'MIRV', desc: '3 missiles pour 1 ammo', icon: '🚀' }, { id: 'nuke_warhead', name: 'Nuke', desc: 'AOE massive, mega shake', icon: '☢️' }],
+  ],
+};
+
 const DT = TICK_MS / 1000;
 
 // ─── Multi-salles ─────────────────────────────────────────────────────────────
@@ -177,7 +253,7 @@ function createRoomState() {
     nextEnemyId: 0,
     settings: { difficulty: 'normal' },
     wave: 1,
-    wavePhase: 'fighting',  // 'fighting' | 'intermission' | 'shop' | 'boss'
+    wavePhase: 'fighting',  // 'fighting' | 'intermission' | 'upgrades' | 'shop' | 'boss'
     waveTimer: 0,
     shopItems: new Map(),
     playersReady: new Set(),
@@ -211,7 +287,7 @@ function broadcastRoom(room, msg) {
 
 function broadcastLobbyUpdate(room) {
   const players = [...room.gameState.players.values()].map(p => ({
-    name: p.name, color: p.color, isHost: p.id === room.hostId,
+    name: p.name, color: p.color, isHost: p.id === room.hostId, shipType: p.shipType || 'viper',
   }));
   broadcastRoom(room, { type: 'lobby_update', code: room.code, players });
 }
@@ -242,18 +318,19 @@ function weightedRandom(table) {
 
 // ─── Création d'entités ───────────────────────────────────────────────────────
 
-function createPlayer(id, name, index) {
+function createPlayer(id, name, index, shipTypeId = 'viper') {
+  const ship = SHIP_TYPES.find(s => s.id === shipTypeId) || SHIP_TYPES[0];
   const angle = (index / 4) * Math.PI * 2;
   const r = 150;
-  return {
+  const p = {
     id, name,
     color: PLAYER_COLORS[index % 4],
     x: Math.cos(angle) * r,
     y: Math.sin(angle) * r,
     angle: angle + Math.PI,
     vx: 0, vy: 0,
-    hp: 4,
-    lives: 2,         // nombre de vies (0 = mort définitive)
+    hp: ship.hp,
+    lives: ship.lives,
     score: 0,
     alive: true,
     respawnTimer: 0,
@@ -266,17 +343,17 @@ function createPlayer(id, name, index) {
     gravwellX: 0, gravwellY: 0,
     dashCooldown: 0,
     selectedWeapon: 'bullet',
-    killStreak: 0,       // kills sans mourir
-    comboTimer: 0,       // ticks restants pour enchaîner un combo
-    comboCount: 0,       // nombre de hits dans le combo actuel
-    lastInputSeq: 0,     // dernier seq d'input traité (pour reconciliation)
-    crystals: 0,          // monnaie shop (séparée du score)
-    waveScore: 0,         // score gagné cette vague (pour stats shop)
-    waveCrystals: 0,      // cristaux gagnés cette vague
-    waveKills: 0,         // astéroïdes détruits cette vague
-    maxHp: 4,
-    speedMult: 1,
-    fireRateMult: 1,
+    killStreak: 0,
+    comboTimer: 0,
+    comboCount: 0,
+    lastInputSeq: 0,
+    crystals: 0,
+    waveScore: 0,
+    waveCrystals: 0,
+    waveKills: 0,
+    maxHp: ship.hp,
+    speedMult: ship.speedMult,
+    fireRateMult: ship.fireRateMult,
     magnetRangeMult: 1,
     shopDrone: false,
     shopNuke: false,
@@ -284,7 +361,20 @@ function createPlayer(id, name, index) {
     autoHealWave: false,
     autoHealTimer: 0,
     rerollCount: 0,
+    shipType: ship.id,
+    weapons: [...ship.startWeapons],
+    weaponXP: { bullet: 0, trishot: 0, minigun: 0, laser: 0, missile: 0 },
+    weaponLevels: { bullet: 0, trishot: 0, minigun: 0, laser: 0, missile: 0 },
+    weaponUpgrades: {},
+    pendingLevelUps: [],
+    xpBoostWave: false,
+    ammoRegenChance: 0,
+    crystalMult: 1,
   };
+  if (ship.startAmmo) {
+    for (const [k, v] of Object.entries(ship.startAmmo)) p.effects[k] = v;
+  }
+  return p;
 }
 
 // Tue un joueur : décrémente lives, respawn si vies restantes
@@ -576,11 +666,13 @@ function processShots(events) {
         gameState.projectiles.set(proj.id, proj);
       }
       events.push({ type: 'shot_fired', playerId: p.id, weaponType: 'trishot' });
+      p.weaponXP.trishot = (p.weaponXP.trishot || 0) + (p.xpBoostWave ? 2 : 1);
     } else if (weaponType === 'bullet' || weaponType === 'missile') {
       if (weaponType === 'missile') p.effects.missile--;
       const proj = createProjectile(p, weaponType);
       gameState.projectiles.set(proj.id, proj);
       events.push({ type: 'shot_fired', playerId: p.id, weaponType });
+      p.weaponXP[weaponType] = (p.weaponXP[weaponType] || 0) + (p.xpBoostWave ? 2 : 1);
     }
 
     else if (weaponType === 'laser') {
@@ -597,6 +689,7 @@ function processShots(events) {
       }
       events.push({ type: 'bolt', weaponType: 'laser', playerId: p.id,
         x: bx, y: by, tx: bx + dx * LASER_RANGE, ty: by + dy * LASER_RANGE });
+      p.weaponXP.laser = (p.weaponXP.laser || 0) + (p.xpBoostWave ? 2 : 1);
       for (const a of hitAsts) hitAsteroid(a, p, events);
     }
   }
@@ -854,7 +947,7 @@ function checkAsteroidPlayerCollisions(events) {
   }
 }
 
-function checkPlayerPickupCollisions(events) {
+function checkPlayerPickupCollisions(events, room) {
   for (const pickup of gameState.pickups.values()) {
     for (const p of gameState.players.values()) {
       if (!p.alive || p.respawnTimer > 0) continue;
@@ -868,12 +961,23 @@ function checkPlayerPickupCollisions(events) {
           p.effects.boost = EFFECT_TICKS_BOOST;
         } else if (pickup.type === 'rapid') {
           p.effects.rapid = EFFECT_TICKS_RAPID;
-        } else if (pickup.type === 'laser') {
-          p.effects.laser += DROP_AMMO.laser;
-        } else if (pickup.type === 'missile') {
-          p.effects.missile += DROP_AMMO.missile;
-        } else if (pickup.type === 'trishot') {
-          p.effects.trishot += DROP_AMMO.trishot;
+        } else if (['laser', 'missile', 'trishot'].includes(pickup.type)) {
+          const wType = pickup.type;
+          if (p.weapons.includes(wType)) {
+            p.effects[wType] += DROP_AMMO[wType];
+          } else if (p.weapons.length < 4) {
+            p.weapons.push(wType);
+            p.effects[wType] += DROP_AMMO[wType];
+          } else if (p.swapKey && p.selectedWeapon !== 'bullet') {
+            // Auto-swap : drop selected weapon, pick up new one
+            p.effects[p.selectedWeapon] = 0;
+            p.weapons = p.weapons.filter(w => w !== p.selectedWeapon);
+            p.weapons.push(wType);
+            p.effects[wType] = (p.effects[wType] || 0) + DROP_AMMO[wType];
+            p.selectedWeapon = wType;
+          } else {
+            continue; // full + no swap key = skip silently
+          }
         } else if (pickup.type === 'drone') {
           p.effects.drone = EFFECT_TICKS_DRONE;
           p.droneShootCd = 0;
@@ -882,7 +986,20 @@ function checkPlayerPickupCollisions(events) {
         } else if (pickup.type === 'intangible') {
           p.effects.intangible = EFFECT_TICKS_INTANGIBLE;
         } else if (pickup.type === 'minigun') {
-          p.effects.minigun += DROP_AMMO.minigun;
+          if (p.weapons.includes('minigun')) {
+            p.effects.minigun += DROP_AMMO.minigun;
+          } else if (p.weapons.length < 4) {
+            p.weapons.push('minigun');
+            p.effects.minigun += DROP_AMMO.minigun;
+          } else if (p.swapKey && p.selectedWeapon !== 'bullet') {
+            p.effects[p.selectedWeapon] = 0;
+            p.weapons = p.weapons.filter(w => w !== p.selectedWeapon);
+            p.weapons.push('minigun');
+            p.effects.minigun = (p.effects.minigun || 0) + DROP_AMMO.minigun;
+            p.selectedWeapon = 'minigun';
+          } else {
+            continue;
+          }
         } else if (pickup.type === 'gravwell') {
           p.effects.gravwell = EFFECT_TICKS_GRAVWELL;
           p.gravwellX = p.x + Math.cos(p.angle) * 100;
@@ -984,6 +1101,7 @@ function integrateMinigun(events) {
       proj.radius = 2; // balles plus petites
       gameState.projectiles.set(proj.id, proj);
       events.push({ type: 'shot_fired', playerId: p.id, weaponType: 'minigun' });
+      p.weaponXP.minigun = (p.weaponXP.minigun || 0) + (p.xpBoostWave ? 2 : 1);
     }
   }
 }
@@ -1316,6 +1434,7 @@ function openShop(room) {
       speedMult: p.speedMult, fireRateMult: p.fireRateMult,
       laser: p.effects.laser, missile: p.effects.missile,
       trishot: p.effects.trishot, minigun: p.effects.minigun,
+      weapons: p.weapons,
     };
     const waveStats = { score: p.waveScore, crystals: p.waveCrystals, kills: p.waveKills };
     ws.send(JSON.stringify({ type: 'shop_open', items, balance: p.crystals, wave: gameState.wave, rerollCost, shipStats, waveStats }));
@@ -1324,12 +1443,32 @@ function openShop(room) {
 
 function applyShopItem(player, itemId) {
   const item = SHOP_POOL.find(i => i.id === itemId);
-  if (!item) return;
+  if (!item) return true;
   switch (itemId) {
-    case 'laser_ammo':   player.effects.laser += 8; break;
-    case 'missile_ammo': player.effects.missile += 3; break;
-    case 'trishot_ammo': player.effects.trishot += 30; break;
-    case 'minigun_ammo': player.effects.minigun += 80; break;
+    case 'laser_ammo':
+      if (!player.weapons.includes('laser')) {
+        if (player.weapons.length >= 4) return false;
+        player.weapons.push('laser');
+      }
+      player.effects.laser += 8; break;
+    case 'missile_ammo':
+      if (!player.weapons.includes('missile')) {
+        if (player.weapons.length >= 4) return false;
+        player.weapons.push('missile');
+      }
+      player.effects.missile += 3; break;
+    case 'trishot_ammo':
+      if (!player.weapons.includes('trishot')) {
+        if (player.weapons.length >= 4) return false;
+        player.weapons.push('trishot');
+      }
+      player.effects.trishot += 30; break;
+    case 'minigun_ammo':
+      if (!player.weapons.includes('minigun')) {
+        if (player.weapons.length >= 4) return false;
+        player.weapons.push('minigun');
+      }
+      player.effects.minigun += 80; break;
     case 'max_hp_up':    player.maxHp++; player.hp = Math.min(player.hp + 1, player.maxHp); break;
     case 'extra_life':   player.lives++; break;
     case 'speed_up':     player.speedMult += 0.15; break;
@@ -1340,7 +1479,17 @@ function applyShopItem(player, itemId) {
     case 'nuke_start':   player.shopNuke = true; break;
     case 'double_dmg':   player.doubleDmgWave = true; break;
     case 'auto_heal':    player.autoHealWave = true; break;
+    case 'xp_boost':     player.xpBoostWave = true; break;
+    case 'ammo_regen':   player.ammoRegenChance = Math.min(player.ammoRegenChance + 0.10, 0.5); break;
+    case 'crystal_magnet': player.crystalMult += 0.20; break;
+    case 'weapon_respec':
+      if (player.weaponUpgrades[player.selectedWeapon]) {
+        player.weaponUpgrades[player.selectedWeapon] = [];
+        player.weaponLevels[player.selectedWeapon] = 0;
+      }
+      break;
   }
+  return true;
 }
 
 function startNextWave(room) {
@@ -1428,6 +1577,28 @@ function checkWinCondition() {
 
 // ─── Boucle de jeu ────────────────────────────────────────────────────────────
 
+function applyWeaponUpgrade(p, weaponId, upgradeId) {
+  if (!p.weaponUpgrades[weaponId]) p.weaponUpgrades[weaponId] = [];
+  p.weaponUpgrades[weaponId].push(upgradeId);
+  p.weaponLevels[weaponId] = (p.weaponLevels[weaponId] || 0) + 1;
+}
+
+function sendNextUpgradeChoice(ws, p) {
+  if (!p.pendingLevelUps || p.pendingLevelUps.length === 0) {
+    ws.send(JSON.stringify({ type: 'upgrade_done' }));
+    return;
+  }
+  const weaponId = p.pendingLevelUps[0];
+  const lvl = p.weaponLevels[weaponId] || 0;
+  const choices = WEAPON_UPGRADES[weaponId]?.[lvl];
+  if (!choices) {
+    p.pendingLevelUps.shift();
+    sendNextUpgradeChoice(ws, p);
+    return;
+  }
+  ws.send(JSON.stringify({ type: 'upgrade_choices', weapon: weaponId, level: lvl + 1, choices }));
+}
+
 function gameTick(room) {
   if (gameState.phase !== 'playing') return;
   const events = [];
@@ -1478,7 +1649,7 @@ function gameTick(room) {
     checkAsteroidCollisions();
     checkAsteroidPlayerCollisions(events);
     applyMagnet();
-    checkPlayerPickupCollisions(events);
+    checkPlayerPickupCollisions(events, room);
 
     if (wp === 'fighting') {
       // Process spawn queue (gradual asteroid spawning)
@@ -1575,6 +1746,16 @@ function gameTick(room) {
         // Purger tous les projectiles pour éviter le freeze côté client
         gameState.projectiles.clear();
         events.push({ type: 'wave_complete', wave: gameState.wave });
+        // Check weapon level-ups
+        for (const p of gameState.players.values()) {
+          p.pendingLevelUps = [];
+          for (const w of p.weapons) {
+            const lvl = p.weaponLevels[w] || 0;
+            if (lvl < 4 && (p.weaponXP[w] || 0) >= WEAPON_XP_THRESHOLDS[lvl]) {
+              p.pendingLevelUps.push(w);
+            }
+          }
+        }
       }
     }
 
@@ -1597,8 +1778,54 @@ function gameTick(room) {
       if (gameState.wave + 1 >= cfg.bossWave) {
         startNextWave(room);
       } else {
-        openShop(room);
+        // Check if any player has pending upgrades
+        let hasPending = false;
+        for (const p of gameState.players.values()) {
+          if (p.pendingLevelUps && p.pendingLevelUps.length > 0) { hasPending = true; break; }
+        }
+        if (hasPending) {
+          gameState.wavePhase = 'upgrades';
+          gameState.upgradeTimeout = 300; // 15s
+          // Send first upgrade choice to each player
+          for (const ws2 of room.wsSet) {
+            if (ws2.readyState !== 1) continue;
+            const p = gameState.players.get(ws2.playerId);
+            if (!p || !p.pendingLevelUps || p.pendingLevelUps.length === 0) {
+              ws2.send(JSON.stringify({ type: 'upgrade_wait' }));
+              continue;
+            }
+            sendNextUpgradeChoice(ws2, p);
+          }
+        } else {
+          openShop(room);
+        }
       }
+    }
+
+  } else if (wp === 'upgrades') {
+    // Keep basic physics
+    for (const p of gameState.players.values()) integratePlayer(p);
+    for (const a of gameState.asteroids.values()) integrateAsteroid(a);
+
+    gameState.upgradeTimeout--;
+    // Check if all players done with upgrades
+    let allDone = true;
+    for (const p of gameState.players.values()) {
+      if (p.pendingLevelUps && p.pendingLevelUps.length > 0) { allDone = false; break; }
+    }
+    if (allDone || gameState.upgradeTimeout <= 0) {
+      // Auto-pick first choice for any remaining pending upgrades
+      for (const p of gameState.players.values()) {
+        while (p.pendingLevelUps && p.pendingLevelUps.length > 0) {
+          const wId = p.pendingLevelUps.shift();
+          const lvl = p.weaponLevels[wId] || 0;
+          const choices = WEAPON_UPGRADES[wId]?.[lvl];
+          if (choices && choices.length > 0) {
+            applyWeaponUpgrade(p, wId, choices[0].id);
+          }
+        }
+      }
+      openShop(room);
     }
 
   } else if (wp === 'shop') {
@@ -1664,6 +1891,10 @@ function buildSnapshot() {
       dashCooldown: p.dashCooldown,
       killStreak: p.killStreak,
       combo: p.comboCount,
+      shipType: p.shipType,
+      weapons: p.weapons,
+      weaponLevels: p.weaponLevels,
+      weaponXP: p.weaponXP,
     })),
     asteroids: [...gameState.asteroids.values()].map(a => ({
       id: a.id, x: a.x, y: a.y, vx: a.vx, vy: a.vy,
@@ -1712,7 +1943,8 @@ function startGame(room, settings) {
 
   let idx = 0;
   for (const p of gameState.players.values()) {
-    const fresh = createPlayer(p.id, p.name, idx++);
+    const shipId = [...room.wsSet].find(w => w.playerId === p.id)?.selectedShip || p.shipType || 'viper';
+    const fresh = createPlayer(p.id, p.name, idx++, shipId);
     Object.assign(p, fresh);
   }
 
@@ -1886,6 +2118,7 @@ Bun.serve({
         p.left   = !!k.left;
         p.right  = !!k.right;
         p.shoot  = !!k.shoot;
+        p.swapKey = !!k.swap; // E key — auto-swap weapon on pickup when full
         if (k.selectedWeapon) p.selectedWeapon = k.selectedWeapon;
         // Dash (clic droit) — boost instantané dans la direction visée
         if (k.dash && p.alive && p.respawnTimer <= 0 && !p.dashCooldown) {
@@ -1912,9 +2145,11 @@ Bun.serve({
         if (!playerShop) return;
         const slot = playerShop.find(s => s.slotId === msg.slotId && !s.bought);
         if (!slot || p.crystals < slot.price) return;
+        let applied = false;
+        withRoom(room, () => { applied = applyShopItem(p, slot.id); });
+        if (!applied) return; // can't buy (e.g. weapon inventory full)
         p.crystals -= slot.price;
         slot.bought = true;
-        withRoom(room, () => applyShopItem(p, slot.id));
         ws.send(JSON.stringify({ type: 'buy_confirm', slotId: msg.slotId, newBalance: p.crystals }));
       }
 
@@ -1969,6 +2204,78 @@ Bun.serve({
           broadcastLobbyUpdate(room);
         }
         return;
+      }
+
+      // ── Ship selection ────────────────────────────────────────────────
+      if (msg.type === 'select_ship') {
+        ws.selectedShip = msg.shipId;
+        const room = ws.room;
+        if (!room) return;
+        const p = room.gameState.players.get(ws.playerId);
+        if (!p || room.gameState.phase !== 'lobby') return;
+        const ship = SHIP_TYPES.find(s => s.id === msg.shipId);
+        if (!ship) return;
+        p.shipType = ship.id;
+        broadcastLobbyUpdate(room);
+      }
+
+      // ── Weapon drop (sell) ─────────────────────────────────────────────
+      if (msg.type === 'weapon_drop') {
+        const room = ws.room;
+        if (!room) return;
+        const p = room.gameState.players.get(ws.playerId);
+        if (!p) return;
+        const wId = msg.weaponId;
+        if (wId === 'bullet') return; // can't drop bullet
+        if (!p.weapons.includes(wId)) return;
+        const pricePerUnit = { laser: 10, missile: 33, trishot: 2.3, minigun: 1.1 };
+        const refund = Math.floor((p.effects[wId] || 0) * (pricePerUnit[wId] || 0) * 0.5);
+        p.crystals += refund;
+        p.effects[wId] = 0;
+        p.weapons = p.weapons.filter(w => w !== wId);
+        if (p.selectedWeapon === wId) p.selectedWeapon = 'bullet';
+        ws.send(JSON.stringify({ type: 'weapon_dropped', weaponId: wId, refund, newBalance: p.crystals }));
+      }
+
+      // ── Weapon swap (during gameplay when inventory full) ──────────────
+      if (msg.type === 'weapon_swap') {
+        const room = ws.room;
+        if (!room) return;
+        const p = room.gameState.players.get(ws.playerId);
+        if (!p) return;
+        const dropW = msg.dropWeapon;
+        const pickupId = msg.pickupId;
+        if (dropW === 'bullet' || !p.weapons.includes(dropW)) return;
+        const pickup = room.gameState.pickups?.get(pickupId);
+        if (!pickup) return;
+        p.effects[dropW] = 0;
+        p.weapons = p.weapons.filter(w => w !== dropW);
+        if (p.selectedWeapon === dropW) p.selectedWeapon = 'bullet';
+        const newW = pickup.type;
+        p.weapons.push(newW);
+        p.effects[newW] = (p.effects[newW] || 0) + (DROP_AMMO[newW] || 0);
+        room.gameState.pickups.delete(pickupId);
+        ws.send(JSON.stringify({ type: 'weapon_swapped', dropped: dropW, picked: newW }));
+      }
+
+      // ── Choose upgrade ─────────────────────────────────────────────────
+      if (msg.type === 'choose_upgrade') {
+        const room = ws.room;
+        if (!room) return;
+        if (room.gameState.wavePhase !== 'upgrades') return;
+        const p = room.gameState.players.get(ws.playerId);
+        if (!p) return;
+        const wId = msg.weapon;
+        const upgradeId = msg.upgradeId;
+        if (!p.pendingLevelUps || p.pendingLevelUps[0] !== wId) return;
+        const lvl = p.weaponLevels[wId] || 0;
+        const choices = WEAPON_UPGRADES[wId]?.[lvl];
+        if (!choices) return;
+        const chosen = choices.find(c => c.id === upgradeId);
+        if (!chosen) return;
+        applyWeaponUpgrade(p, wId, upgradeId);
+        p.pendingLevelUps.shift();
+        sendNextUpgradeChoice(ws, p);
       }
 
       // ── Rejouer (host uniquement, après gameover) ─────────────────────────

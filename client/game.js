@@ -24,6 +24,26 @@ function saveSetting(key, val) {
   localStorage.setItem('ab_' + key, String(val));
 }
 
+// ─── Achievements (persistés en localStorage) ────────────────────────────────
+
+function getAchievements() {
+  try { return JSON.parse(localStorage.getItem('ab_achievements') || '{}'); } catch { return {}; }
+}
+function saveAchievement(key) {
+  const achs = getAchievements();
+  achs[key] = true;
+  localStorage.setItem('ab_achievements', JSON.stringify(achs));
+}
+function isShipUnlocked(shipDef) {
+  if (!shipDef.unlock) return true;
+  const achs = getAchievements();
+  const u = shipDef.unlock;
+  if (u.type === 'score') return !!achs[`score_${u.value}`];
+  if (u.type === 'wave') return !!achs[`wave_${u.value}`];
+  if (u.type === 'boss_kill') return !!achs['boss_kill'];
+  return false;
+}
+
 // Master gain nodes (créés à la demande)
 let sfxGain = null;
 function getSfxGain() {
@@ -385,6 +405,81 @@ function buildShipGeometry() {
 }
 const SHIP_GEO = buildShipGeometry();
 
+// ─── Ship variants ──────────────────────────────────────────────────────────
+
+const SHIP_DEFS = [
+  { id: 'viper', name: 'VIPER', desc: 'Vaisseau standard. Équilibré.',
+    stats: { hp: 4, speed: 1, fire: 1 }, unlock: null },
+  { id: 'phantom', name: 'PHANTOM', desc: 'Rapide et agile, mais fragile.',
+    stats: { hp: 3, speed: 1.25, fire: 1.1 }, unlock: { type: 'score', value: 3000, label: 'Score ≥ 3000' } },
+  { id: 'titan', name: 'TITAN', desc: 'Tank blindé. Lent mais résistant.',
+    stats: { hp: 6, speed: 0.8, fire: 0.85 }, unlock: { type: 'wave', value: 7, label: 'Atteindre vague 7' } },
+  { id: 'spectre', name: 'SPECTRE', desc: 'Commence avec le laser. Offensif.',
+    stats: { hp: 3, speed: 1, fire: 1 }, unlock: { type: 'boss_kill', value: 1, label: 'Tuer un boss' } },
+];
+
+function buildPhantomGeometry() {
+  const g = SHIP_GEO.clone();
+  g.scale(0.7, 1.1, 0.8);
+  return g;
+}
+function buildTitanGeometry() {
+  const g = SHIP_GEO.clone();
+  g.scale(1.35, 0.9, 1.2);
+  return g;
+}
+function buildSpectreGeometry() {
+  const g = SHIP_GEO.clone();
+  g.scale(0.85, 1.05, 0.9);
+  return g;
+}
+
+const SHIP_GEOS = {
+  viper: SHIP_GEO,
+  phantom: buildPhantomGeometry(),
+  titan: buildTitanGeometry(),
+  spectre: buildSpectreGeometry(),
+};
+
+const SHIP_EDGES = {};
+function getShipEdges(shipType) {
+  if (!SHIP_EDGES[shipType]) {
+    SHIP_EDGES[shipType] = new THREE.EdgesGeometry(SHIP_GEOS[shipType] || SHIP_GEOS.viper, 25);
+  }
+  return SHIP_EDGES[shipType];
+}
+
+let selectedShipId = 'viper';
+
+function renderShipSelector() {
+  const el = document.getElementById('ship-selector');
+  if (!el) return;
+  el.innerHTML = SHIP_DEFS.map(s => {
+    const unlocked = isShipUnlocked(s);
+    const selected = s.id === selectedShipId;
+    const cls = `ship-card${selected ? ' selected' : ''}${!unlocked ? ' locked' : ''}`;
+    const maxHp = 6, maxSpd = 1.25, maxFire = 1.1;
+    return `<div class="${cls}" data-ship="${s.id}">
+      ${!unlocked ? `<div class="ship-lock-icon">\u{1F512}</div>` : ''}
+      <div class="ship-card-name">${s.name}</div>
+      <div class="ship-card-desc">${s.desc}</div>
+      <div class="ship-card-stats">
+        <div class="ship-stat-bar"><span>PV</span><div class="ship-stat-track"><div class="ship-stat-fill" style="width:${(s.stats.hp/maxHp)*100}%"></div></div></div>
+        <div class="ship-stat-bar"><span>VIT</span><div class="ship-stat-track"><div class="ship-stat-fill" style="width:${(s.stats.speed/maxSpd)*100}%"></div></div></div>
+        <div class="ship-stat-bar"><span>TIR</span><div class="ship-stat-track"><div class="ship-stat-fill" style="width:${(s.stats.fire/maxFire)*100}%"></div></div></div>
+      </div>
+      ${!unlocked ? `<div class="ship-lock-label">${s.unlock.label}</div>` : ''}
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.ship-card:not(.locked)').forEach(card => {
+    card.addEventListener('click', () => {
+      selectedShipId = card.dataset.ship;
+      if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'select_ship', shipId: selectedShipId }));
+      renderShipSelector();
+    });
+  });
+}
+
 // detail=1 pour les grands (plus de facettes → look rocheux), detail=0 pour les petits
 const astGeos = {
   32: new THREE.IcosahedronGeometry(32, 1),
@@ -439,16 +534,18 @@ function getOrCreatePlayer(snap) {
   const color = hexToInt(snap.color);
   const group = new THREE.Group();
 
-  // Corps du vaisseau (3D)
+  // Corps du vaisseau (3D) — géométrie selon le type de vaisseau
+  const shipType = snap.shipType || 'viper';
+  const shipGeo = SHIP_GEOS[shipType] || SHIP_GEOS.viper;
   const mat = new THREE.MeshPhongMaterial({
     color, emissive: color, emissiveIntensity: 0.25,
     shininess: 100, flatShading: true, side: THREE.DoubleSide,
   });
-  const body = new THREE.Mesh(SHIP_GEO, mat);
+  const body = new THREE.Mesh(shipGeo, mat);
   group.add(body);
 
   // Contour lumineux (edges glow)
-  const edgeGeo = new THREE.EdgesGeometry(SHIP_GEO, 25);
+  const edgeGeo = getShipEdges(shipType);
   const edgeMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
   const edges = new THREE.LineSegments(edgeGeo, edgeMat);
   group.add(edges);
@@ -1409,7 +1506,7 @@ function updateLasers(dt) {
 
 // ─── Input ────────────────────────────────────────────────────────────────────
 
-const keys = { thrust: false, left: false, right: false, shoot: false };
+const keys = { thrust: false, left: false, right: false, shoot: false, swap: false };
 let clickShootFrame = false;
 
 function getKeyMap() {
@@ -1430,14 +1527,16 @@ window.addEventListener('keydown', e => {
   if (map.left.includes(e.code))  keys.left   = true;
   if (map.right.includes(e.code)) keys.right  = true;
   if (map.shoot.includes(e.code)) { keys.shoot = true; e.preventDefault(); }
+  if (e.code === 'KeyE') keys.swap = true;
   if (e.code === 'Escape') toggleSettings();
-  // Weapon select keys 1-5
-  if (e.key >= '1' && e.key <= '5') {
+  // Weapon select keys 1-4 (dynamic weapon list)
+  if (e.key >= '1' && e.key <= '4') {
     const idx = parseInt(e.key) - 1;
-    if (idx < ALL_WEAPONS.length) {
-      const w = ALL_WEAPONS[idx];
+    if (idx < lastKnownWeapons.length) {
+      const wId = lastKnownWeapons[idx];
       const me = currSnapshot?.players.find(p => p.id === myId);
-      if (w.id === 'bullet' || (me && me[w.id] > 0)) selectWeapon(w.id, true);
+      const ammoMap = { trishot: me?.trishot || 0, minigun: me?.minigun || 0, laser: me?.laser || 0, missile: me?.missile || 0 };
+      if (wId === 'bullet' || (ammoMap[wId] || 0) > 0) selectWeapon(wId, true);
     }
   }
 });
@@ -1448,6 +1547,7 @@ window.addEventListener('keyup', e => {
   if (map.left.includes(e.code))  keys.left   = false;
   if (map.right.includes(e.code)) keys.right  = false;
   if (map.shoot.includes(e.code)) keys.shoot  = false;
+  if (e.code === 'KeyE') keys.swap = false;
 });
 
 // Clic souris = tir (gauche maintenu) / dash (droit)
@@ -1653,6 +1753,7 @@ function showAnnouncement(text, color) {
 let selectedWeapon = 'bullet';
 let weaponPopId = null;
 let weaponPopTime = 0;
+let lastKnownWeapons = ['bullet'];
 const inventoryBar = document.getElementById('inventory-bar');
 const activeBuffs  = document.getElementById('active-buffs');
 
@@ -1677,14 +1778,20 @@ function updateInventory(snap) {
   const me = snap.players.find(p => p.id === myId);
   if (!me) return;
 
-  // Ammo lookup
+  // Dynamic weapon list from snapshot (4 weapons max)
+  const myWeapons = me.weapons || ['bullet'];
   const ammoMap = { trishot: me.trishot || 0, minigun: me.minigun || 0, laser: me.laser || 0, missile: me.missile || 0 };
 
-  // Fallback si arme selectionnee n'a plus de munitions
+  // Fallback si arme selectionnee n'est plus dans l'inventaire ou n'a plus de munitions
+  if (selectedWeapon !== 'bullet' && !myWeapons.includes(selectedWeapon)) selectedWeapon = 'bullet';
   if (selectedWeapon !== 'bullet' && (ammoMap[selectedWeapon] || 0) <= 0) selectedWeapon = 'bullet';
 
+  // Store last known weapon list for scroll handler
+  lastKnownWeapons = myWeapons;
+
   const nowMs = performance.now();
-  inventoryBar.innerHTML = ALL_WEAPONS.map((w, i) => {
+  inventoryBar.innerHTML = myWeapons.map((wId, i) => {
+    const w = ALL_WEAPONS.find(a => a.id === wId) || ALL_WEAPONS[0];
     const active = w.id === selectedWeapon ? ' active' : '';
     const ammo = w.id === 'bullet' ? null : ammoMap[w.id];
     const empty = (ammo !== null && ammo <= 0) ? ' empty' : '';
@@ -1728,22 +1835,65 @@ function updateInventory(snap) {
   activeBuffs.innerHTML = buffsHtml;
 }
 
-// Scroll pour changer d'arme
+// Scroll pour changer d'arme (utilise la liste dynamique)
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
-  const me = currSnapshot?.players.find(p => p.id === myId);
-  if (!me) return;
-  const weapons = ['bullet'];
-  if (me.trishot) weapons.push('trishot');
-  if (me.minigun) weapons.push('minigun');
-  if (me.laser) weapons.push('laser');
-  if (me.missile) weapons.push('missile');
+  const weapons = lastKnownWeapons;
+  if (weapons.length <= 1) return;
   const idx = weapons.indexOf(selectedWeapon);
   const nextId = e.deltaY > 0
     ? weapons[(idx + 1) % weapons.length]
     : weapons[(idx - 1 + weapons.length) % weapons.length];
   selectWeapon(nextId, true);
 }, { passive: false });
+
+// ─── Upgrade screen ─────────────────────────────────────────────────────────
+
+function renderUpgradeChoices(weapon, level, choices) {
+  const weaponDef = ALL_WEAPONS.find(w => w.id === weapon);
+  const titleEl = document.getElementById('upgrade-title');
+  const infoEl = document.getElementById('upgrade-weapon-info');
+  const choicesEl = document.getElementById('upgrade-choices');
+  const waitEl = document.getElementById('upgrade-wait');
+
+  titleEl.textContent = 'AMÉLIORATION D\'ARME';
+  infoEl.innerHTML = `${weaponDef?.icon || '?'} ${weaponDef?.label || weapon} — Niveau ${level}`;
+  waitEl.style.display = 'none';
+
+  choicesEl.innerHTML = choices.map(c => `
+    <div class="upgrade-card" data-upgrade="${c.id}">
+      <div class="upgrade-card-icon">${c.icon}</div>
+      <div class="upgrade-card-name">${c.name}</div>
+      <div class="upgrade-card-desc">${c.desc}</div>
+    </div>
+  `).join('');
+
+  choicesEl.querySelectorAll('.upgrade-card').forEach(card => {
+    card.addEventListener('click', () => {
+      if (ws?.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'choose_upgrade', weapon, upgradeId: card.dataset.upgrade }));
+      }
+    });
+  });
+}
+
+// ─── Weapon swap hint (non-intrusive HUD) ──────────────────────────────────
+
+let swapHintTimer = 0;
+function showSwapHint() {
+  swapHintTimer = 3; // seconds
+}
+function updateSwapHint(dt) {
+  const el = document.getElementById('swap-hint');
+  if (!el) return;
+  if (swapHintTimer > 0) {
+    swapHintTimer -= dt;
+    el.style.display = 'block';
+    el.style.opacity = Math.min(1, swapHintTimer * 2);
+  } else {
+    el.style.display = 'none';
+  }
+}
 
 // ─── Pickup flash (animation bords d'écran) ───────────────────────────────────
 
@@ -1974,6 +2124,8 @@ function handleEvent(msg) {
 
   if (msg.type === 'wave_complete') {
     showAnnouncement(`WAVE ${msg.wave} COMPLETE!`, '#00ff88');
+    // Save wave achievement
+    if (msg.wave) saveAchievement(`wave_${msg.wave}`);
     // Supprimer immédiatement tous les objets en vol pour éviter qu'ils se figent
     for (const [id] of [...projectileMeshes]) removeProjectile(id);
     for (const [id] of [...asteroidMeshes])   removeAsteroid(id);
@@ -2006,11 +2158,18 @@ function renderShop(items, balance, wave, rerollCost, shipStats, waveStats) {
   if (statsEl && shipStats && waveStats) {
     const speedPct = Math.round((shipStats.speedMult - 1) * 100);
     const ratePct = Math.round((shipStats.fireRateMult - 1) * 100);
-    const weapons = [];
-    if (shipStats.trishot > 0) weapons.push(`🔱 ×${shipStats.trishot}`);
-    if (shipStats.minigun > 0) weapons.push(`🔫 ×${shipStats.minigun}`);
-    if (shipStats.laser > 0) weapons.push(`⚡ ×${shipStats.laser}`);
-    if (shipStats.missile > 0) weapons.push(`🚀 ×${shipStats.missile}`);
+    const weaponsList = shipStats.weapons || [];
+    const weaponsDisplay = [];
+    if (shipStats.trishot > 0) weaponsDisplay.push(`🔱 ×${shipStats.trishot}`);
+    if (shipStats.minigun > 0) weaponsDisplay.push(`🔫 ×${shipStats.minigun}`);
+    if (shipStats.laser > 0) weaponsDisplay.push(`⚡ ×${shipStats.laser}`);
+    if (shipStats.missile > 0) weaponsDisplay.push(`🚀 ×${shipStats.missile}`);
+
+    // Sell buttons for non-bullet weapons
+    const sellBtns = weaponsList.filter(w => w !== 'bullet').map(wId => {
+      const def = ALL_WEAPONS.find(a => a.id === wId);
+      return `<button class="shop-sell-btn" data-sell-weapon="${wId}" style="font-size:0.3rem;padding:2px 6px;margin-left:4px;cursor:pointer;background:rgba(255,50,50,0.2);border:1px solid #ff4444;color:#ff4444;border-radius:4px">${def?.icon || '?'} VENDRE</button>`;
+    }).join('');
 
     statsEl.innerHTML = `
       <div class="shop-stat-panel">
@@ -2018,7 +2177,7 @@ function renderShop(items, balance, wave, rerollCost, shipStats, waveStats) {
         <div class="stat-row"><span class="stat-label">PV</span><span class="stat-val">${shipStats.hp}/${shipStats.maxHp} ❤️ · Vies: ${shipStats.lives}</span></div>
         <div class="stat-row"><span class="stat-label">VITESSE</span><span class="stat-val">${speedPct >= 0 ? '+' : ''}${speedPct}%</span></div>
         <div class="stat-row"><span class="stat-label">CADENCE</span><span class="stat-val">${ratePct >= 0 ? '+' : ''}${ratePct}%</span></div>
-        ${weapons.length ? `<div class="stat-row"><span class="stat-label">ARMES</span><span class="stat-val">${weapons.join(' ')}</span></div>` : ''}
+        ${weaponsDisplay.length ? `<div class="stat-row"><span class="stat-label">ARMES</span><span class="stat-val">${weaponsDisplay.join(' ')}${sellBtns}</span></div>` : ''}
       </div>
       <div class="shop-stat-panel">
         <div class="stat-panel-title">⭐ VAGUE ${wave}</div>
@@ -2048,6 +2207,16 @@ function renderShop(items, balance, wave, rerollCost, shipStats, waveStats) {
       const slotId = parseInt(card.dataset.slot);
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'buy_item', slotId }));
+      }
+    });
+  });
+
+  // Sell weapon handlers
+  statsEl.querySelectorAll('.shop-sell-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const wId = btn.dataset.sellWeapon;
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'sell_weapon', weaponId: wId }));
       }
     });
   });
@@ -2132,6 +2301,8 @@ function showScreen(name) {
   hudEl.style.display          = name === 'hud' ? 'block' : 'none';
   const shopScreen = document.getElementById('shop-screen');
   if (shopScreen) shopScreen.style.display = name === 'shop' ? 'flex' : 'none';
+  const upgradeScreen = document.getElementById('upgrade-screen');
+  if (upgradeScreen) upgradeScreen.style.display = name === 'upgrade' ? 'flex' : 'none';
   // Hide cursor during gameplay (not shop/gameover)
   document.body.style.cursor = name === 'hud' ? 'none' : '';
   // Musique : menu dans lobby/join/waiting/gameover/shop, game en jeu
@@ -2302,6 +2473,7 @@ function connect() {
       const hostSettings = document.getElementById('host-settings');
       if (hostSettings) hostSettings.style.display = 'flex';
       showScreen('waiting');
+      renderShipSelector();
       startInputLoop();
     }
 
@@ -2314,6 +2486,7 @@ function connect() {
       myRoomCode = msg.code;
       roomCodeVal.textContent = msg.code;
       renderWaitingPlayers(msg.players);
+      renderShipSelector();
       // Si on n'est pas encore sur l'écran waiting (cas d'un rejoignant)
       if (screenWaiting.style.display === 'none' && screenGameover.style.display === 'none') {
         showScreen('waiting');
@@ -2353,6 +2526,26 @@ function connect() {
         showScreen('shop');
         renderShop(msg.items, msg.balance, msg.wave, msg.rerollCost, msg.shipStats, msg.waveStats);
       });
+    }
+
+    if (msg.type === 'upgrade_choices') {
+      fadeTransition(() => {
+        showScreen('upgrade');
+        renderUpgradeChoices(msg.weapon, msg.level, msg.choices);
+      });
+    }
+    if (msg.type === 'upgrade_wait') {
+      showScreen('upgrade');
+      document.getElementById('upgrade-choices').innerHTML = '';
+      document.getElementById('upgrade-wait').style.display = 'block';
+    }
+    if (msg.type === 'upgrade_done') {
+      document.getElementById('upgrade-choices').innerHTML = '';
+      document.getElementById('upgrade-wait').style.display = 'block';
+      document.getElementById('upgrade-wait').textContent = 'Upgrades terminées ! En attente du shop...';
+    }
+    if (msg.type === 'weapon_full') {
+      showSwapHint();
     }
 
     if (msg.type === 'buy_confirm') {
@@ -2412,6 +2605,16 @@ function connect() {
           ${i === 0 ? '🏆' : `#${i+1}`} ${s.name} — ${s.score} 💎
         </div>`
       ).join('');
+      // Check achievements
+      const myScore = msg.scores.find(s => s.id === myId);
+      if (myScore) {
+        if (myScore.score >= 3000) saveAchievement('score_3000');
+      }
+      if (msg.reason === 'bosskilled') saveAchievement('boss_kill');
+      if (msg.wave) {
+        for (let w = 1; w <= msg.wave; w++) saveAchievement(`wave_${w}`);
+      }
+
       // Nettoyage visuel
       if (bossMesh) { scene.remove(bossMesh.group); bossMesh = null; }
       document.getElementById('boss-hud').style.display = 'none';
@@ -2435,7 +2638,7 @@ function startInputLoop() {
     clickShootFrame = false;
     const dash = dashFrame; dashFrame = false;
     const seq = inputSeq++;
-    const inputKeys = { thrust: keys.thrust, left: keys.left, right: keys.right, shoot: shootNow, dash, selectedWeapon };
+    const inputKeys = { thrust: keys.thrust, left: keys.left, right: keys.right, shoot: shootNow, dash, swap: keys.swap, selectedWeapon };
     ws.send(JSON.stringify({ type: 'input', seq, keys: inputKeys }));
   }, 50);
 }
@@ -2617,6 +2820,7 @@ function animate(now) {
       }
     }
   }
+  updateSwapHint(dt);
   updateStormWarning();
   updateBorderArcs();
   // Flash border zap
